@@ -944,6 +944,85 @@ async function findCampaignByInviteOnline(code) {
   return row ? normalizeCampaignRecord({ ...(row.payload || {}), ...row }) : null;
 }
 
+function campaignLookupFilters(campaign) {
+  return [
+    campaign?.id ? `id.eq.${campaign.id}` : "",
+    campaign?.codigoConvite || campaign?.codigo_convite ? `codigo_convite.eq.${normalizeInviteCode(campaign.codigoConvite || campaign.codigo_convite)}` : "",
+    campaign?.inviteCode || campaign?.invite_code ? `invite_code.eq.${normalizeInviteCode(campaign.inviteCode || campaign.invite_code)}` : ""
+  ].filter(Boolean);
+}
+
+async function refreshActiveCampaignFromSupabase({ rerender = false } = {}) {
+  const client = supabaseClient();
+  const localCampaign = currentCampaign();
+  if (!client) {
+    setSyncStatus("Supabase indisponivel. Usando dados locais da campanha.", true);
+    return localCampaign;
+  }
+  if (!localCampaign) {
+    setSyncStatus("Nenhuma campanha ativa para atualizar.", true);
+    return null;
+  }
+
+  setSyncStatus("Atualizando campanha pelo Supabase...");
+  const filters = campaignLookupFilters(localCampaign);
+  const campaignQuery = filters.length
+    ? client.from("campanhas").select("*").or(filters.join(",")).limit(1)
+    : client.from("campanhas").select("*").eq("id", localCampaign.id).limit(1);
+  const { data: campaignRows, error: campaignError } = await campaignQuery;
+  if (campaignError) throw new Error(`campanhas: ${remoteErrorMessage(campaignError)}`);
+  const remoteCampaign = campaignRows?.[0]
+    ? normalizeCampaignRecord({ ...(campaignRows[0].payload || {}), ...campaignRows[0] })
+    : normalizeCampaignRecord(localCampaign);
+
+  const campaign = upsertLocalCampaign({
+    ...localCampaign,
+    ...remoteCampaign,
+    personagens: Array.isArray(localCampaign.personagens) ? localCampaign.personagens : []
+  });
+  state.activeCampaignId = campaign.id;
+  if (!state.activeSessionId) state.activeSessionId = campaign.sessoes[0]?.id || null;
+
+  const { data: characterRows, error: charactersError } = await client
+    .from("personagens")
+    .select("*")
+    .eq("campanha_id", campaign.id);
+  if (charactersError) throw new Error(`personagens: ${remoteErrorMessage(charactersError)}`);
+
+  const linkedRows = Array.isArray(characterRows) ? characterRows.filter((row) => row.campanha_id === campaign.id) : [];
+  const userIds = linkedRows.map((row) => row.user_id).filter(Boolean);
+  let userMap = {};
+  if (userIds.length) {
+    const { data: userRows, error: usersError } = await client
+      .from("usuarios")
+      .select("id, username, email")
+      .in("id", Array.from(new Set(userIds)));
+    if (!usersError && Array.isArray(userRows)) {
+      userMap = Object.fromEntries(userRows.map((row) => [row.id, row]));
+    }
+  }
+
+  const linkedSheets = linkedRows.map((row) => normalizeSheet({
+    ...(row.payload || {}),
+    id: row.id,
+    name: row.payload?.name || row.nome || row.name || "Agente",
+    player: row.payload?.player || userMap[row.user_id]?.username || row.nome || "Jogador"
+  }));
+  state.sheets = mergeById(state.sheets, linkedSheets).map(normalizeSheet);
+  campaign.personagens = linkedSheets.map((sheet) => sheet.id);
+  campaign.jogadores = mergeUnique([...(campaign.jogadores || []), ...userIds]);
+  state.campaigns = state.campaigns.map((item) => item.id === campaign.id ? campaign : item);
+  seedSessionTokensFromSheets(campaign, currentSession());
+  syncCurrentSession();
+  localStorage.setItem("mesa-arcana", JSON.stringify(state));
+  setSyncStatus(`Campanha atualizada: ${linkedSheets.length} ficha(s) vinculada(s).`);
+  if (rerender) {
+    renderPortal();
+    renderAll();
+  }
+  return campaign;
+}
+
 async function joinCampaignWithInvite(code) {
   const user = currentUser();
   if (!user) throw new Error("Faca login primeiro.");
@@ -1438,7 +1517,7 @@ function renderMasterShield() {
     return `
       <article class="shield-agent">
         <b>${escapeHtml(sheet.name || "Agente")}</b>
-        <span>${escapeHtml(sheet.className || "Sem classe")} | ${escapeHtml(sheet.nex || "5%")}</span>
+        <span>${escapeHtml(sheet.player || "Jogador")} | ${escapeHtml(sheet.className || "Sem classe")} | ${escapeHtml(sheet.nex || "5%")}</span>
         <div class="shield-bars">
           ${shieldBar("PV", sheet.hp, sheet.hpMax, "#a82924")}
           ${shieldBar("PE", sheet.pe, sheet.peMax, "#d08a22")}
@@ -3013,11 +3092,18 @@ function renderPortal() {
     `).join("") : `<p>Nenhuma ficha criada.</p>`;
   }
   document.querySelectorAll("[data-portal-open]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
       state.activeCampaignId = button.dataset.portalOpen;
       const campaign = currentCampaign();
       state.activeSessionId = campaign?.sessoes.find((session) => button.dataset.mode === "master" || session.visibleToPlayers)?.id || campaign?.sessoes[0]?.id || null;
       state.activeTab = "mesa";
+      if (button.dataset.mode === "master") {
+        try {
+          await refreshActiveCampaignFromSupabase();
+        } catch (error) {
+          setSyncStatus(`Nao consegui atualizar campanha online: ${error.message}`, true);
+        }
+      }
       showApp(button.dataset.mode);
     });
   });
@@ -3068,7 +3154,10 @@ function renderPortal() {
 
 function campaignSheetNames(campaign) {
   return (campaign.personagens || [])
-    .map((id) => state.sheets.find((sheet) => sheet.id === id)?.name)
+    .map((id) => {
+      const sheet = state.sheets.find((item) => item.id === id);
+      return sheet ? `${sheet.name || "Agente"} (${sheet.player || "Jogador"})` : "";
+    })
     .filter(Boolean)
     .join(", ");
 }
@@ -3244,7 +3333,7 @@ document.querySelector("#joinCampaignButton")?.addEventListener("click", async (
   }
 });
 
-document.querySelector("#openMasterPanel")?.addEventListener("click", () => {
+document.querySelector("#openMasterPanel")?.addEventListener("click", async () => {
   const campaign = currentCampaign() || state.campaigns[0];
   const user = currentUser();
   if (campaign && user && campaign.mestreId !== user.id && user.role !== "admin") {
@@ -3256,7 +3345,21 @@ document.querySelector("#openMasterPanel")?.addEventListener("click", () => {
     state.activeSessionId = campaign.sessoes[0]?.id || null;
   }
   state.activeTab = "mesa";
+  try {
+    await refreshActiveCampaignFromSupabase();
+  } catch (error) {
+    setSyncStatus(`Nao consegui atualizar campanha online: ${error.message}`, true);
+  }
   showApp("master");
+});
+
+document.querySelector("#refreshCampaignButton")?.addEventListener("click", async () => {
+  try {
+    await refreshActiveCampaignFromSupabase({ rerender: true });
+  } catch (error) {
+    setSyncStatus(`Nao consegui atualizar campanha online: ${error.message}`, true);
+    window.alert(error.message);
+  }
 });
 
 document.querySelector("#openPlayerPanel")?.addEventListener("click", () => {
