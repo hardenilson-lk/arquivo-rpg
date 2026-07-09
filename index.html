@@ -1,0 +1,503 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>arquivos</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&family=IM+Fell+English:ital@0;1&family=Special+Elite&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="investigative-theme.css" />
+  </head>
+  <body class="player-view">
+    <section id="loginScreen" class="login-screen">
+      <div class="login-photo" aria-hidden="true"></div>
+      <form id="loginForm" class="login-folder paper-panel">
+        <i class="paper-clip clip-sidebar" aria-hidden="true"></i>
+        <div class="login-stamp">Confidencial</div>
+        <h1 class="typewriter-title failed-type">arquivos</h1>
+        <p>Sistema de Investigacao e Registro de Campanhas</p>
+        <h2>Acesso ao sistema</h2>
+        <label>Nome de usuario <input id="loginUser" type="text" autocomplete="username" placeholder="Digite seu usuario" /></label>
+        <label>Senha <input id="loginPassword" type="password" autocomplete="current-password" placeholder="Digite sua senha" /></label>
+        <label class="check-row"><input id="rememberAccess" type="checkbox" /> Lembrar acesso</label>
+        <button id="loginSubmit" class="login-enter" type="submit">Entrar <span>-></span></button>
+        <div class="login-actions">
+          <button id="createAccess" type="button">Criar acesso</button>
+          <button id="inviteAccess" type="button">Entrar com convite</button>
+        </div>
+        <p class="login-error" id="loginError" aria-live="polite"></p>
+        <small>"A verdade esta nos registros. O resto e interpretacao."</small>
+      </form>
+      <aside class="login-crt">
+        <pre>&gt; SISTEMA ARQUIVOS v1.07
+&gt; INICIALIZANDO...
+&gt; VERIFICANDO ACESSO...
+&gt; AGUARDANDO CREDENCIAIS...
+&gt; _</pre>
+      </aside>
+    </section>
+
+    <section id="signupModal" class="signup-modal hidden" aria-label="Criar acesso">
+      <form id="signupForm" class="signup-card paper-panel" novalidate>
+        <div class="login-stamp">Novo acesso</div>
+        <h2>Inscricao de agente</h2>
+        <label>Nome de usuario <input id="signupUser" type="text" autocomplete="username" required placeholder="Seu usuario" /></label>
+        <label>Email <input id="signupEmail" type="email" autocomplete="email" required placeholder="email@exemplo.com" /></label>
+        <label>Senha <input id="signupPassword" type="password" autocomplete="new-password" required placeholder="Minimo 4 caracteres" /></label>
+        <label>Confirmar senha <input id="signupConfirm" type="password" autocomplete="new-password" required placeholder="Repita a senha" /></label>
+        <p id="signupError" class="login-error" aria-live="polite"></p>
+        <div class="login-actions">
+          <button id="signupSubmit" class="primary" type="submit">Criar conta</button>
+          <button id="signupCancel" type="button">Cancelar</button>
+        </div>
+      </form>
+    </section>
+
+    <section id="portalScreen" class="portal-screen hidden">
+      <div class="portal-folder paper-panel">
+        <header class="portal-head">
+          <div>
+            <h1 class="typewriter-title failed-type">arquivos</h1>
+            <p id="portalSubtitle">Gerenciamento de campanhas, sessoes e fichas</p>
+          </div>
+          <div class="portal-actions">
+            <span id="portalUserBadge" class="access-level">USUARIO</span>
+            <button id="logoutButton" type="button">Sair</button>
+          </div>
+        </header>
+        <section class="portal-intro">
+          <div>
+            <span class="intro-kicker">O Arquivo Sombrio</span>
+            <h2>A verdade nunca desaparece. Ela apenas espera ser encontrada.</h2>
+            <p>Cada investigacao e registrada como um Arquivo independente, com evidencias, personagens, locais e acontecimentos que desafiam qualquer explicacao racional.</p>
+          </div>
+          <dl>
+            <div><dt>Arquivos</dt><dd>Oneshots independentes</dd></div>
+            <div><dt>Fichas</dt><dd>Personagens salvos na conta</dd></div>
+            <div><dt>Campanhas</dt><dd>Casos conduzidos por mestres</dd></div>
+          </dl>
+        </section>
+        <section class="portal-about note-paper">
+          <div>
+            <h2>O Arquivo Sombrio</h2>
+            <p>Ha historias que jamais chegaram aos jornais. Casos encerrados sem respostas. Desaparecimentos inexplicaveis. Rituais esquecidos. Lugares onde a realidade parece se romper.</p>
+            <p>Durante decadas, relatos desse tipo foram ocultados, arquivados ou simplesmente apagados da memoria coletiva. Entretanto, alguem reuniu essas informacoes em um unico lugar.</p>
+            <p>Esse lugar e conhecido apenas como <strong>O Arquivo Sombrio</strong>.</p>
+            <p>Cada documento presente neste servidor representa um Arquivo: um caso independente contendo pessoas, evidencias, entidades, locais e acontecimentos que desafiam qualquer explicacao racional.</p>
+            <blockquote>A pergunta nao e se existe algo escondido. A pergunta e: ate onde voce esta disposto a ir para descobrir a verdade?</blockquote>
+          </div>
+          <div>
+            <h3>Estrutura do servidor</h3>
+            <ul>
+              <li>Cada investigacao e registrada como um Arquivo.</li>
+              <li>Cada Arquivo corresponde a uma Oneshot independente.</li>
+              <li>Evidencias, relatos, personagens e documentos permanecem armazenados para futuras consultas.</li>
+              <li>Alguns Arquivos podem estar conectados entre si. Outros jamais deveriam ser abertos.</li>
+            </ul>
+            <p><strong>Criador do universo e idealizador do projeto:</strong><br />Adenilson Lanna D. Hurley</p>
+          </div>
+        </section>
+        <div class="portal-grid">
+          <section class="portal-card">
+            <h2>Criar campanha</h2>
+            <label>Nome da campanha <input id="newCampaignName" type="text" placeholder="Nova campanha" /></label>
+            <button id="createCampaignButton" class="primary" type="button">Criar campanha</button>
+          </section>
+          <section class="portal-card">
+            <h2>Criar ficha</h2>
+            <label>Nome do personagem <input id="newSheetName" type="text" placeholder="Novo agente" /></label>
+            <button id="createSheetButton" class="primary" type="button">Criar e abrir ficha</button>
+            <small id="sheetLimitInfo">Limite: 5 fichas por conta.</small>
+          </section>
+          <section class="portal-card">
+            <h2>Entrar com convite</h2>
+            <label>Codigo do mestre <input id="inviteCode" type="text" placeholder="CAMP-0000" /></label>
+            <button id="joinCampaignButton" type="button">Levar ficha ativa</button>
+          </section>
+          <section class="portal-card">
+            <h2>Acesso rapido</h2>
+            <button id="openMasterPanel" class="primary" type="button">Pagina do mestre</button>
+            <button id="openPlayerPanel" type="button">Pagina do jogador</button>
+          </section>
+        </div>
+        <div class="portal-columns">
+          <section>
+            <h2>Campanhas</h2>
+            <div id="portalCampaigns" class="archive-card-list"></div>
+          </section>
+          <section>
+            <h2>Minhas fichas</h2>
+            <div id="portalSheets" class="archive-card-list"></div>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <main id="appShell" class="app-shell archive-shell hidden">
+      <aside class="side-panel folder-sidebar paper-panel">
+        <i class="paper-clip clip-sidebar" aria-hidden="true"></i>
+        <div class="brand archive-brand">
+          <span class="brand-mark stamp-mark">ARQ</span>
+          <div>
+            <h1 class="typewriter-title failed-type">arquivos</h1>
+            <p id="campaignLabel" class="archive-context">Campanha: Mesa de combate</p>
+            <p id="currentArchiveLabel" class="archive-context">Arquivo atual: sem arquivo</p>
+            <p id="sessionLabel" class="archive-context">Sessao: Cripta da Lua</p>
+            <p id="accessLevel" class="access-level">NIVEL DE ACESSO: PERMITIDO</p>
+          </div>
+        </div>
+
+        <div id="modeBadge" class="mode-switch danger-stamp">modo jogador</div>
+
+        <nav class="tabs archive-tabs" aria-label="Arquivo">
+          <button class="tab menu-button active" data-tab="mesa" type="button"><span>▣</span>Mapa</button>
+          <button class="tab menu-button" data-tab="fichas" type="button"><span>☷</span>Ficha</button>
+          <button class="tab menu-button" data-tab="inventario" type="button"><span>▤</span>Inventario</button>
+          <button class="tab menu-button" data-tab="anotacoes" type="button"><span>✎</span>Anotacoes</button>
+          <button class="tab menu-button" data-tab="missoes" type="button"><span>◎</span>Missoes</button>
+          <button class="tab menu-button" data-tab="biblioteca" type="button"><span>⌘</span>Arquivos</button>
+          <button class="tab menu-button" data-tab="configuracoes" type="button"><span>⚙</span>Configuracoes</button>
+          <button id="backPortal" class="menu-button" type="button"><span>↩</span>Portal</button>
+          <button id="saveFileButton" class="menu-button save-file-button" type="button"><span>✓</span>Salvar arquivo</button>
+        </nav>
+
+        <section class="objective-card note-paper">
+          <h2>Objetivo atual</h2>
+          <p id="archiveObjective">Investigue a Cripta da Lua e descubra o que esta por tras dos simbolos.</p>
+          <b>Local atual</b>
+          <span id="archiveLocation">Camara central</span>
+        </section>
+
+        <section class="panel-section file-controls master-only">
+          <h2>Mapa</h2>
+          <label>
+            Nome
+            <input id="mapName" type="text" maxlength="34" />
+          </label>
+          <div class="two-cols">
+            <label>
+              Largura
+              <input id="gridCols" type="number" min="6" max="30" />
+            </label>
+            <label>
+              Altura
+              <input id="gridRows" type="number" min="6" max="24" />
+            </label>
+          </div>
+          <button id="resizeGrid" class="primary" type="button">Aplicar grid</button>
+        </section>
+
+        <section class="panel-section file-controls master-only">
+          <h2>Tokens</h2>
+          <label>
+            Nome
+            <input id="tokenName" type="text" maxlength="24" placeholder="Agente, criatura, NPC..." />
+          </label>
+          <div class="token-tools">
+            <label>
+              Cor
+              <input id="tokenColor" type="color" value="#c83b2f" />
+            </label>
+            <label>
+              Luz
+              <input id="tokenLight" type="range" min="0" max="6" value="3" />
+            </label>
+          </div>
+          <button id="addToken" class="primary" type="button">Adicionar token</button>
+        </section>
+
+        <section class="panel-section file-controls">
+          <h2>Ambiente</h2>
+          <label class="check-row">
+            <input id="lightsOn" type="checkbox" checked />
+            Iluminacao ativa
+          </label>
+          <label>
+            Escuridao
+            <input id="darkness" type="range" min="0" max="90" value="58" />
+          </label>
+          <button id="clearMap" class="ghost master-only" type="button">Limpar tokens</button>
+        </section>
+      </aside>
+
+      <section class="workspace archive-workspace">
+        <header class="topbar archive-topbar">
+          <div>
+            <p class="eyebrow">Campanha local</p>
+            <h2 id="viewTitle">Mapa de combate</h2>
+          </div>
+          <div class="quick-roll dice-paper">
+            <label for="quickFormula">Rolagem</label>
+            <input id="quickFormula" type="text" value="1d20+3" aria-label="Formula de dado rapida" />
+            <button id="quickRoll" type="button">Rolar dado</button>
+            <button id="rpsButton" type="button">Disputa</button>
+          </div>
+        </header>
+
+        <section id="mesa" class="view active-view archive-dashboard">
+          <div class="map-frame paper-panel">
+            <i class="tape tape-a" aria-hidden="true"></i>
+            <i class="tape tape-b" aria-hidden="true"></i>
+            <div class="map-label">
+              <span>MAPA</span>
+              <strong id="mapTitleLabel">Base da equipe</strong>
+            </div>
+            <div class="map-quick-tools master-only">
+              <details>
+                <summary>Grid</summary>
+                <label>Colunas <input id="quickGridCols" type="number" min="6" max="30" /></label>
+                <label>Linhas <input id="quickGridRows" type="number" min="6" max="24" /></label>
+                <label>Tam. casa <input id="quickCellSize" type="number" min="34" max="88" /></label>
+                <label>Opacidade <input id="quickGridOpacity" type="range" min="0" max="100" /></label>
+                <label>Cor <input id="quickGridColor" type="color" /></label>
+                <button id="quickResizeGrid" type="button">Aplicar</button>
+              </details>
+              <details>
+                <summary>Fundo</summary>
+                <input id="mapImageInput" type="file" accept="image/*" />
+                <div class="map-bg-actions">
+                  <button id="fitMapImage" type="button">Ajustar</button>
+                  <button id="centerMapImage" type="button">Centralizar</button>
+                  <button id="lockMapImage" type="button">Travar</button>
+                  <button id="removeMapImage" type="button">Remover</button>
+                </div>
+                <label>Escala X <input id="mapImageScaleX" type="range" min="50" max="200" /></label>
+                <label>Escala Y <input id="mapImageScaleY" type="range" min="50" max="200" /></label>
+                <label>Posicao X <input id="mapImageX" type="range" min="-100" max="100" /></label>
+                <label>Posicao Y <input id="mapImageY" type="range" min="-100" max="100" /></label>
+                <label>Rotacao <input id="mapImageRotation" type="range" min="-180" max="180" /></label>
+                <label>Opacidade <input id="mapImageOpacity" type="range" min="0" max="100" /></label>
+              </details>
+              <details>
+                <summary>Luz</summary>
+                <label class="check-row"><input id="quickLightsOn" type="checkbox" /> Ativa</label>
+                <label>Escuridao <input id="quickDarkness" type="range" min="0" max="90" /></label>
+              </details>
+              <details>
+                <summary>Ferramentas</summary>
+                <label>Acao
+                  <select id="mapTool">
+                    <option value="move">Mover token</option>
+                    <option value="reveal">Revelar neblina</option>
+                    <option value="hide">Ocultar neblina</option>
+                    <option value="wall">Parede</option>
+                    <option value="door">Porta</option>
+                    <option value="erase">Apagar marca</option>
+                  </select>
+                </label>
+                <label class="check-row"><input id="fogEnabled" type="checkbox" /> Neblina ativa</label>
+                <button id="revealAllFog" type="button">Revelar tudo</button>
+                <button id="hideAllFog" type="button">Ocultar tudo</button>
+              </details>
+              <details>
+                <summary>Token</summary>
+                <input id="quickTokenName" type="text" maxlength="24" placeholder="Nome do token" />
+                <div class="quick-token-row">
+                  <input id="quickTokenColor" type="color" value="#c83b2f" aria-label="Cor do token" />
+                  <label>Luz <input id="quickTokenLight" type="number" min="0" max="10" value="3" /></label>
+                </div>
+                <button id="quickAddToken" type="button">Adicionar</button>
+              </details>
+              <details>
+                <summary>NPC</summary>
+                <input id="npcName" type="text" maxlength="24" placeholder="Nome do NPC" />
+                <div class="quick-token-row">
+                  <input id="npcColor" type="color" value="#7b241c" aria-label="Cor do NPC" />
+                  <label>PV <input id="npcHp" type="number" min="1" max="999" value="20" /></label>
+                </div>
+                <label>Tipo <input id="npcType" type="text" maxlength="28" placeholder="Criatura, culto, civil..." /></label>
+                <label class="check-row"><input id="npcHidden" type="checkbox" /> Invisivel para jogadores</label>
+                <button id="quickAddNpc" type="button">Criar NPC</button>
+              </details>
+            </div>
+            <div class="battlefield-wrap">
+              <div id="battlefield" class="battlefield" aria-label="Grid de combate"></div>
+              <div id="diceStage" class="dice-stage" aria-live="polite"></div>
+            </div>
+            <div class="map-tools">
+              <button type="button" data-tab="configuracoes" class="tab mini-tab">Grid</button>
+              <button type="button" data-tab="configuracoes" class="tab mini-tab">Luz</button>
+              <button type="button" data-tab="mesa" class="mini-tab">Centralizar</button>
+            </div>
+          </div>
+
+          <aside class="right-stack">
+            <section class="crt-monitor dark-panel">
+              <div class="crt-screen">
+                <pre id="crtStatus">&gt; SISTEMA ARQUIVOS v1.07
+&gt; USUARIO: JOGADOR
+&gt; AGUARDANDO COMANDO...</pre>
+                <div id="rollResult" class="roll-result">Pronto para rolar.</div>
+              </div>
+            </section>
+
+            <section class="token-board paper-panel">
+              <h2>Tokens no mapa</h2>
+              <div id="tokenList" class="token-list" aria-live="polite"></div>
+            </section>
+
+            <section class="paper-panel map-chat-panel">
+              <h2>Chat da sessao</h2>
+              <div id="chatLog" class="chat-log"></div>
+              <form id="chatForm" class="chat-form">
+                <input id="chatText" type="text" maxlength="240" placeholder="Mensagem para a mesa..." />
+                <button type="submit">Enviar</button>
+              </form>
+            </section>
+
+            <section class="character-board">
+              <h2>Sua ficha</h2>
+              <div id="characterCards" class="character-cards"></div>
+            </section>
+
+            <section class="master-shield paper-panel master-only">
+              <h2>Escudo do mestre</h2>
+              <div id="masterShield" class="master-shield-list"></div>
+            </section>
+          </aside>
+
+          <section class="note-paper clues-panel">
+            <h2>Pistas reveladas</h2>
+            <ul id="noteList">
+              <li>Simbolo central reage a presenca do artefato.</li>
+              <li>Luz fraca nas tochas.</li>
+              <li>Possivel passagem secreta na parede norte.</li>
+            </ul>
+          </section>
+
+          <section class="history-panel paper-panel">
+            <div class="history-head">
+              <h2>Historico</h2>
+              <button id="clearRollLog" type="button">Limpar</button>
+            </div>
+            <div id="rollLog" class="roll-log"></div>
+          </section>
+        </section>
+
+        <section id="fichas" class="view file-view">
+          <div class="sheet-layout">
+            <div id="crisisSheet" class="crisis-sheet"></div>
+            <form id="sheetForm" class="sheet-editor legacy-editor">
+              <input type="hidden" id="sheetId" />
+              <label>Nome do agente <input id="sheetName" type="text" required maxlength="36" /></label>
+              <label>Origem <input id="sheetRole" type="text" maxlength="46" /></label>
+              <div class="three-cols">
+                <label>Classe <input id="className" type="text" maxlength="24" placeholder="Combatente" /></label>
+                <label>Trilha <input id="pathName" type="text" maxlength="28" placeholder="Aniquilador" /></label>
+                <label>NEX <input id="nex" type="text" maxlength="8" placeholder="5%" /></label>
+              </div>
+              <div class="three-cols">
+                <label>Patente <input id="rank" type="text" maxlength="24" placeholder="Recruta" /></label>
+                <label>Desloc. <input id="movement" type="number" value="9" /></label>
+                <label>PE/rodada <input id="peRound" type="number" value="1" /></label>
+              </div>
+              <div class="stats-grid op-attributes">
+                <label>AGI <input id="agi" type="number" value="1" /></label>
+                <label>FOR <input id="str" type="number" value="1" /></label>
+                <label>INT <input id="int" type="number" value="1" /></label>
+                <label>PRE <input id="pre" type="number" value="1" /></label>
+                <label>VIG <input id="vig" type="number" value="1" /></label>
+              </div>
+              <div class="resource-grid">
+                <label>PV atual <input id="hp" type="number" value="16" /></label>
+                <label>PV max <input id="hpMax" type="number" value="16" /></label>
+                <label>PE atual <input id="pe" type="number" value="2" /></label>
+                <label>PE max <input id="peMax" type="number" value="2" /></label>
+                <label>SAN atual <input id="san" type="number" value="12" /></label>
+                <label>SAN max <input id="sanMax" type="number" value="12" /></label>
+              </div>
+              <div class="three-cols">
+                <label>Defesa <input id="defense" type="number" value="10" /></label>
+                <label>Bloqueio <input id="block" type="number" value="0" /></label>
+                <label>Esquiva <input id="dodge" type="number" value="0" /></label>
+              </div>
+              <label>Pericias <textarea id="skills" rows="4" placeholder="Luta +5, Pontaria +5, Investigacao +5..."></textarea></label>
+              <label>Ataques e rituais <textarea id="attacks" rows="4" placeholder="Revolver 1d6, faca 1d4, ritual..."></textarea></label>
+              <label>Inventario e anotacoes <textarea id="notes" rows="5" placeholder="Itens, pistas, condicoes, traumas..."></textarea></label>
+              <div class="button-row">
+                <button class="primary" type="submit">Salvar ficha</button>
+                <button id="newSheet" class="ghost" type="button">Nova</button>
+              </div>
+            </form>
+            <div id="sheetList" class="sheet-list"></div>
+          </div>
+        </section>
+
+        <section id="inventario" class="view dossier-view">
+          <section class="paper-panel dossier-placeholder">
+            <h2>Inventario</h2>
+            <p>Inventario vinculado diretamente a ficha ativa.</p>
+            <div id="inventoryApp" class="inventory-linked"></div>
+          </section>
+        </section>
+
+        <section id="anotacoes" class="view dossier-view">
+          <section class="note-paper dossier-placeholder">
+            <h2>Anotacoes</h2>
+            <div id="notesApp" class="notes-linked"></div>
+          </section>
+        </section>
+
+        <section id="missoes" class="view dossier-view">
+          <section class="paper-panel dossier-placeholder">
+            <h2>Missoes</h2>
+            <div id="missionsApp" class="missions-linked"></div>
+          </section>
+        </section>
+
+        <section id="biblioteca" class="view dossier-view">
+          <section class="paper-panel dossier-placeholder">
+            <h2>Arquivos da campanha</h2>
+            <p>Cada sessao da campanha e um arquivo numerado. Mestres podem criar, liberar, bloquear e arquivar sessoes.</p>
+            <div id="campaignFiles" class="archive-card-list"></div>
+            <div class="dice-board embedded-dice">
+              <div class="dice-composer">
+                <label>
+                  Formula
+                  <input id="diceFormula" type="text" value="2d6+1" />
+                </label>
+                <div class="preset-row wide-dice">
+                  <button type="button" data-roll="1d4">d4</button>
+                  <button type="button" data-roll="1d5">d5</button>
+                  <button type="button" data-roll="1d6">d6</button>
+                  <button type="button" data-roll="1d7">d7</button>
+                  <button type="button" data-roll="1d8">d8</button>
+                  <button type="button" data-roll="1d9">d9</button>
+                  <button type="button" data-roll="1d10">d10</button>
+                  <button type="button" data-roll="1d11">d11</button>
+                  <button type="button" data-roll="1d12">d12</button>
+                  <button type="button" data-roll="1d13">d13</button>
+                  <button type="button" data-roll="1d14">d14</button>
+                  <button type="button" data-roll="1d15">d15</button>
+                  <button type="button" data-roll="1d16">d16</button>
+                  <button type="button" data-roll="1d17">d17</button>
+                  <button type="button" data-roll="1d18">d18</button>
+                  <button type="button" data-roll="1d19">d19</button>
+                  <button type="button" data-roll="1d20">d20</button>
+                </div>
+                <button id="rollDice" class="primary" type="button">Rolar dados</button>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <section id="configuracoes" class="view dossier-view">
+          <section class="paper-panel dossier-placeholder">
+            <h2>Configuracoes</h2>
+            <p>Ajustes visuais, modo jogador/mestre, tamanho do grid e importacao/exportacao da campanha.</p>
+            <div class="admin-box">
+              <b>Login adm master local</b>
+              <span>Usuario: admin</span>
+              <span>Senha: arquivo0001</span>
+            </div>
+            <button class="primary" type="button" data-tab="mesa">Voltar ao mapa</button>
+          </section>
+        </section>
+      </section>
+    </main>
+    <script src="archive-panels.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
