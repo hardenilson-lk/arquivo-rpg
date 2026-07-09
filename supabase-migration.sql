@@ -20,6 +20,7 @@ create table if not exists public.campanhas (
   owner_id uuid,
   mestre_id uuid,
   nome text,
+  codigo_convite text,
   invite_code text,
   objetivo_atual text,
   local_atual text,
@@ -74,6 +75,7 @@ create table if not exists public.rolagens (
 alter table public.campanhas add column if not exists owner_id uuid;
 alter table public.campanhas add column if not exists mestre_id uuid;
 alter table public.campanhas add column if not exists nome text;
+alter table public.campanhas add column if not exists codigo_convite text;
 alter table public.campanhas add column if not exists invite_code text;
 alter table public.campanhas add column if not exists objetivo_atual text;
 alter table public.campanhas add column if not exists local_atual text;

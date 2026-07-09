@@ -376,6 +376,7 @@ function createCampaignRecord(nome, mestreId) {
   const id = crypto.randomUUID();
   const campaignName = nome || "Campanha sem nome";
   const session = createSessionRecord(id, 1, "Arquivo inicial", "Arquivo aberto para a primeira sessao.", blankMap("Mapa inicial"));
+  const inviteCode = `CAMP-${Math.floor(1000 + Math.random() * 9000)}`;
   return {
     id,
     nome: campaignName,
@@ -383,7 +384,8 @@ function createCampaignRecord(nome, mestreId) {
     jogadores: [],
     personagens: [],
     sessoes: [session],
-    inviteCode: `CAMP-${Math.floor(1000 + Math.random() * 9000)}`
+    inviteCode,
+    codigoConvite: inviteCode
   };
 }
 
@@ -558,6 +560,7 @@ function upsertLocalAccount(account) {
 }
 
 function normalizeCampaignRecord(campaign = {}) {
+  const inviteCode = campaign.codigoConvite || campaign.codigo_convite || campaign.inviteCode || campaign.invite_code || `CAMP-${Math.floor(1000 + Math.random() * 9000)}`;
   const safe = {
     id: campaign.id || crypto.randomUUID(),
     nome: campaign.nome || campaign.name || "Campanha sem nome",
@@ -565,7 +568,8 @@ function normalizeCampaignRecord(campaign = {}) {
     jogadores: Array.isArray(campaign.jogadores) ? campaign.jogadores : [],
     personagens: Array.isArray(campaign.personagens) ? campaign.personagens : [],
     sessoes: Array.isArray(campaign.sessoes) && campaign.sessoes.length ? campaign.sessoes : [createSessionRecord(campaign.id || crypto.randomUUID(), 1, "Arquivo inicial", "Arquivo aberto para a primeira sessao.", blankMap("Mapa inicial"))],
-    inviteCode: campaign.inviteCode || campaign.invite_code || `CAMP-${Math.floor(1000 + Math.random() * 9000)}`
+    inviteCode,
+    codigoConvite: inviteCode
   };
   safe.sessoes = safe.sessoes.map((session, index) => ({
     ...createSessionRecord(safe.id, index + 1, session.titulo || `Sessao ${index + 1}`, session.resumo || "", normalizeMap(session.mapa || session.map || blankMap(session.titulo || "Mapa inicial"))),
@@ -710,7 +714,7 @@ async function loadOnlineWorkspace() {
     ]);
 
     const remoteCampaigns = campaignRows
-      .map((row) => normalizeCampaignRecord(row.payload || row))
+      .map((row) => normalizeCampaignRecord({ ...(row.payload || {}), ...row }))
       .filter((campaign) => campaign.mestreId === user.id || campaign.jogadores.includes(user.id) || (user.campaignIds || []).includes(campaign.id) || user.role === "admin");
     const remoteSheets = sheetRows
       .map((row) => normalizeSheet(row.payload || row))
@@ -796,6 +800,7 @@ async function saveOnlineState() {
       mestre_id: campaign.mestreId,
       nome: campaign.nome,
       invite_code: campaign.inviteCode,
+      codigo_convite: campaign.codigoConvite || campaign.inviteCode,
       objetivo_atual: currentSession()?.mission || campaign.sessoes?.[0]?.mission || "",
       local_atual: state.map?.name || "",
       payload: normalizeCampaignRecord(campaign),
@@ -899,16 +904,63 @@ function createSheetForCurrentUser(name) {
   return sheet;
 }
 
-function joinCampaignWithInvite(code) {
+function normalizeInviteCode(code) {
+  return String(code || "").trim().toUpperCase();
+}
+
+function campaignMatchesInvite(campaign, code) {
+  const clean = normalizeInviteCode(code);
+  return [
+    campaign?.inviteCode,
+    campaign?.codigoConvite,
+    campaign?.invite_code,
+    campaign?.codigo_convite
+  ].some((value) => normalizeInviteCode(value) === clean);
+}
+
+function upsertLocalCampaign(campaign) {
+  const safeCampaign = normalizeCampaignRecord(campaign);
+  const index = state.campaigns.findIndex((item) => item.id === safeCampaign.id);
+  if (index >= 0) state.campaigns[index] = normalizeCampaignRecord({ ...state.campaigns[index], ...safeCampaign });
+  else state.campaigns.push(safeCampaign);
+  return state.campaigns.find((item) => item.id === safeCampaign.id);
+}
+
+async function findCampaignByInviteOnline(code) {
+  const client = supabaseClient();
+  const clean = normalizeInviteCode(code);
+  if (!client || !clean) return null;
+  setSyncStatus(`Buscando convite ${clean} no Supabase...`);
+  const { data, error } = await client
+    .from("campanhas")
+    .select("*")
+    .or(`codigo_convite.eq.${clean},invite_code.eq.${clean}`)
+    .limit(1);
+  if (error) {
+    setSyncStatus(`Nao consegui buscar convite online: ${remoteErrorMessage(error)}`, true);
+    return null;
+  }
+  const row = data?.[0];
+  return row ? normalizeCampaignRecord({ ...(row.payload || {}), ...row }) : null;
+}
+
+async function joinCampaignWithInvite(code) {
   const user = currentUser();
   if (!user) throw new Error("Faca login primeiro.");
-  const campaign = state.campaigns.find((item) => item.inviteCode.toLowerCase() === code.trim().toLowerCase());
+  const clean = normalizeInviteCode(code);
+  if (!clean) throw new Error("Informe o codigo do convite.");
+  let campaign = state.campaigns.find((item) => campaignMatchesInvite(item, clean));
+  if (!campaign) {
+    const onlineCampaign = await findCampaignByInviteOnline(clean);
+    if (onlineCampaign) campaign = upsertLocalCampaign(onlineCampaign);
+  }
   if (!campaign) throw new Error("Convite nao encontrado.");
   campaign.jogadores = Array.from(new Set([...(campaign.jogadores || []), user.id]));
   user.campaignIds = Array.from(new Set([...(user.campaignIds || []), campaign.id]));
   state.activeCampaignId = campaign.id;
   state.activeSessionId = campaign.sessoes.find((session) => session.visibleToPlayers)?.id || campaign.sessoes[0]?.id;
   linkActiveSheetToCampaign(campaign);
+  await saveOnlineState();
   return campaign;
 }
 
@@ -3138,8 +3190,7 @@ document.querySelector("#inviteAccess")?.addEventListener("click", async () => {
       loginAccount(document.querySelector("#loginUser").value, document.querySelector("#loginPassword").value);
     }
     const code = window.prompt("Codigo do convite:", "");
-    if (code) joinCampaignWithInvite(code);
-    await saveOnlineState();
+    if (code) await joinCampaignWithInvite(code);
     setAuthError("");
     showPortal();
   } catch (error) {
@@ -3185,9 +3236,8 @@ document.querySelector("#createSheetButton")?.addEventListener("click", async ()
 
 document.querySelector("#joinCampaignButton")?.addEventListener("click", async () => {
   try {
-    joinCampaignWithInvite(document.querySelector("#inviteCode").value);
+    await joinCampaignWithInvite(document.querySelector("#inviteCode").value);
     save();
-    await saveOnlineState();
     renderPortal();
   } catch (error) {
     window.alert(error.message);
