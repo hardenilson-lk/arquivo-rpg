@@ -763,6 +763,22 @@ label {
   padding: 0 12px;
 }
 
+.sync-status {
+  border: 1px dashed rgba(83, 64, 38, .55);
+  background: rgba(242, 214, 158, .45);
+  color: #2b1b11;
+  font-size: .74rem;
+  line-height: 1.35;
+  margin: -4px 0 12px;
+  padding: 8px 10px;
+  text-transform: uppercase;
+}
+
+.sync-status.sync-error {
+  border-color: rgba(151, 36, 36, .72);
+  color: #7c1d1d;
+}
+
 .danger-stamp {
   border: 2px solid var(--stamp-red);
   background: rgba(255,255,255,.08);

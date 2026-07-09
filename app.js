@@ -61,6 +61,7 @@ const els = {
   chatLog: document.querySelector("#chatLog"),
   chatForm: document.querySelector("#chatForm"),
   chatText: document.querySelector("#chatText"),
+  syncStatus: document.querySelector("#syncStatus"),
   rollResult: document.querySelector("#rollResult"),
   rollLog: document.querySelector("#rollLog")
 };
@@ -514,6 +515,363 @@ function loginAccount(username, password) {
   return account;
 }
 
+let onlineSaveTimer = null;
+let onlineSaveRunning = false;
+let onlineLoadRunning = false;
+
+function supabaseClient() {
+  return window.arquivosSupabase || null;
+}
+
+function setSyncStatus(message, isError = false) {
+  if (els.syncStatus) {
+    els.syncStatus.textContent = message;
+    els.syncStatus.classList.toggle("sync-error", isError);
+  }
+  const method = isError ? "warn" : "log";
+  console[method](`[Supabase] ${message}`);
+}
+
+function remoteErrorMessage(error) {
+  return error?.message || error?.details || error?.hint || "Falha desconhecida no Supabase.";
+}
+
+function mergeUnique(values = []) {
+  return Array.from(new Set(values.filter(Boolean)));
+}
+
+function upsertLocalAccount(account) {
+  const safeAccount = {
+    id: account.id,
+    username: account.username || account.email || "agente",
+    email: account.email || "",
+    password: account.password || "",
+    role: account.role || "player",
+    sheetIds: Array.isArray(account.sheetIds) ? account.sheetIds : [],
+    campaignIds: Array.isArray(account.campaignIds) ? account.campaignIds : [],
+    online: account.online === true
+  };
+  const existing = state.accounts.findIndex((item) => item.id === safeAccount.id || item.email?.toLowerCase() === safeAccount.email.toLowerCase());
+  if (existing >= 0) state.accounts[existing] = { ...state.accounts[existing], ...safeAccount };
+  else state.accounts.push(safeAccount);
+  return state.accounts.find((item) => item.id === safeAccount.id);
+}
+
+function normalizeCampaignRecord(campaign = {}) {
+  const safe = {
+    id: campaign.id || crypto.randomUUID(),
+    nome: campaign.nome || campaign.name || "Campanha sem nome",
+    mestreId: campaign.mestreId || campaign.owner_id || campaign.ownerId || "",
+    jogadores: Array.isArray(campaign.jogadores) ? campaign.jogadores : [],
+    personagens: Array.isArray(campaign.personagens) ? campaign.personagens : [],
+    sessoes: Array.isArray(campaign.sessoes) && campaign.sessoes.length ? campaign.sessoes : [createSessionRecord(campaign.id || crypto.randomUUID(), 1, "Arquivo inicial", "Arquivo aberto para a primeira sessao.", blankMap("Mapa inicial"))],
+    inviteCode: campaign.inviteCode || campaign.invite_code || `CAMP-${Math.floor(1000 + Math.random() * 9000)}`
+  };
+  safe.sessoes = safe.sessoes.map((session, index) => ({
+    ...createSessionRecord(safe.id, index + 1, session.titulo || `Sessao ${index + 1}`, session.resumo || "", normalizeMap(session.mapa || session.map || blankMap(session.titulo || "Mapa inicial"))),
+    ...session,
+    campaignId: safe.id,
+    numero: Number(session.numero || index + 1),
+    codigoArquivo: session.codigoArquivo || formatArquivoNumber(Number(session.numero || index + 1)),
+    mapa: normalizeMap(session.mapa || session.map || {}),
+    tokens: Array.isArray(session.tokens) ? session.tokens : [],
+    anotacoes: Array.isArray(session.anotacoes) ? session.anotacoes : [],
+    pistas: Array.isArray(session.pistas) ? session.pistas : [],
+    chat: Array.isArray(session.chat) ? session.chat : [],
+    logs: Array.isArray(session.logs) ? session.logs : []
+  }));
+  return safe;
+}
+
+function mergeById(localRows, remoteRows) {
+  const map = new Map();
+  [...(localRows || []), ...(remoteRows || [])].forEach((row) => {
+    if (row?.id) map.set(row.id, { ...(map.get(row.id) || {}), ...row });
+  });
+  return Array.from(map.values());
+}
+
+async function safeSelect(table, columns = "*") {
+  const client = supabaseClient();
+  const { data, error } = await client.from(table).select(columns);
+  if (error) {
+    setSyncStatus(`Nao consegui ler ${table}: ${remoteErrorMessage(error)}`, true);
+    return [];
+  }
+  return Array.isArray(data) ? data : [];
+}
+
+async function createAccountOnline(username, email, password, confirmPassword = password) {
+  const cleanUser = username.trim();
+  const cleanEmail = email.trim().toLowerCase();
+  if (!cleanUser || !cleanEmail || !password) throw new Error("Informe usuario, email e senha.");
+  if (!isValidEmail(cleanEmail)) throw new Error("Informe um email valido.");
+  if (password.length < 4) throw new Error("A senha precisa ter pelo menos 4 caracteres.");
+  if (password !== confirmPassword) throw new Error("As senhas nao conferem.");
+
+  const client = supabaseClient();
+  if (!client) throw new Error("Supabase nao carregou. O acesso sera apenas local.");
+
+  setSyncStatus("Criando acesso online...");
+  const existingUsers = await safeSelect("usuarios", "id, username, email");
+  if (existingUsers.some((account) => account.username?.toLowerCase() === cleanUser.toLowerCase())) throw new Error("Esse usuario ja existe.");
+  if (existingUsers.some((account) => account.email?.toLowerCase() === cleanEmail)) throw new Error("Esse email ja esta cadastrado.");
+
+  const { data, error } = await client.auth.signUp({
+    email: cleanEmail,
+    password,
+    options: { data: { username: cleanUser } }
+  });
+  if (error) throw new Error(remoteErrorMessage(error));
+  const userId = data.user?.id || crypto.randomUUID();
+  const accountData = {
+    id: userId,
+    username: cleanUser,
+    email: cleanEmail,
+    role: "player",
+    sheetIds: [],
+    campaignIds: [],
+    online: true
+  };
+  await saveOnlineUser(accountData);
+  const account = upsertLocalAccount(accountData);
+  state.currentUserId = account.id;
+  await loadOnlineWorkspace();
+  setSyncStatus("Acesso online criado.");
+  return account;
+}
+
+async function loginAccountOnline(username, password) {
+  const identifier = username.trim();
+  const client = supabaseClient();
+  if (!client) throw new Error("Supabase nao carregou.");
+  setSyncStatus("Entrando online...");
+  let email = identifier;
+  let usernameLabel = identifier;
+  if (!isValidEmail(identifier)) {
+    const { data, error } = await client.from("usuarios").select("*").ilike("username", identifier).limit(1);
+    if (error) throw new Error(remoteErrorMessage(error));
+    const userRow = data?.[0];
+    if (!userRow?.email) throw new Error("Usuario nao encontrado no Supabase.");
+    email = userRow.email;
+    usernameLabel = userRow.username || identifier;
+  }
+
+  const { data, error } = await client.auth.signInWithPassword({ email, password });
+  if (error) throw new Error(remoteErrorMessage(error));
+  const authUser = data.user;
+  const userRows = await safeSelect("usuarios", "*");
+  const userRow = userRows.find((row) => row.id === authUser.id || row.email?.toLowerCase() === email.toLowerCase());
+  const account = upsertLocalAccount({
+    id: authUser.id,
+    username: userRow?.username || authUser.user_metadata?.username || usernameLabel,
+    email: authUser.email || email,
+    role: userRow?.role || userRow?.payload?.role || "player",
+    sheetIds: userRow?.sheet_ids || userRow?.payload?.sheetIds || [],
+    campaignIds: userRow?.campaign_ids || userRow?.payload?.campaignIds || [],
+    online: true
+  });
+  state.currentUserId = account.id;
+  await loadOnlineWorkspace();
+  setSyncStatus("Dados online carregados.");
+  return account;
+}
+
+async function saveOnlineUser(user = currentUser()) {
+  const client = supabaseClient();
+  if (!client || !user || user.id === "admin-master") return;
+  const payload = {
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    role: user.role || "player",
+    sheet_ids: user.sheetIds || [],
+    campaign_ids: user.campaignIds || [],
+    payload: user,
+    updated_at: new Date().toISOString()
+  };
+  const { error } = await client.from("usuarios").upsert(payload, { onConflict: "id" });
+  if (error) throw new Error(`usuarios: ${remoteErrorMessage(error)}`);
+}
+
+async function loadOnlineWorkspace() {
+  const client = supabaseClient();
+  const user = currentUser();
+  if (!client || !user || user.id === "admin-master") return;
+  onlineLoadRunning = true;
+  try {
+    setSyncStatus("Carregando arquivos online...");
+    const [campaignRows, sheetRows, inventoryRows, noteRows, rollRows] = await Promise.all([
+      safeSelect("campanhas"),
+      safeSelect("personagens"),
+      safeSelect("inventario"),
+      safeSelect("anotacoes"),
+      safeSelect("rolagens")
+    ]);
+
+    const remoteCampaigns = campaignRows
+      .map((row) => normalizeCampaignRecord(row.payload || row))
+      .filter((campaign) => campaign.mestreId === user.id || campaign.jogadores.includes(user.id) || (user.campaignIds || []).includes(campaign.id) || user.role === "admin");
+    const remoteSheets = sheetRows
+      .map((row) => normalizeSheet(row.payload || row))
+      .filter((sheet) => sheet.player === user.username || (user.sheetIds || []).includes(sheet.id) || sheetRows.some((row) => row.id === sheet.id && row.user_id === user.id));
+
+    state.campaigns = mergeById(state.campaigns, remoteCampaigns).map(normalizeCampaignRecord);
+    state.sheets = mergeById(state.sheets, remoteSheets).map(normalizeSheet);
+
+    const onlineSheetIds = sheetRows.filter((row) => row.user_id === user.id).map((row) => row.id).filter(Boolean);
+    user.sheetIds = mergeUnique([...(user.sheetIds || []), ...onlineSheetIds, ...remoteSheets.map((sheet) => sheet.id)]);
+    const onlineCampaignIds = campaignRows
+      .filter((row) => row.owner_id === user.id || row.mestre_id === user.id || row.payload?.mestreId === user.id || row.payload?.jogadores?.includes(user.id))
+      .map((row) => row.id)
+      .filter(Boolean);
+    user.campaignIds = mergeUnique([...(user.campaignIds || []), ...onlineCampaignIds, ...remoteCampaigns.map((campaign) => campaign.id)]);
+
+    inventoryRows.forEach((row) => {
+      const sheet = state.sheets.find((item) => item.id === row.personagem_id);
+      if (sheet && row.payload?.inventoryText) sheet.inventory = row.payload.inventoryText;
+    });
+    noteRows.forEach((row) => {
+      const sheet = state.sheets.find((item) => item.id === row.personagem_id);
+      if (sheet && row.payload?.notesText) sheet.notes = row.payload.notesText;
+    });
+    const remoteRolls = rollRows
+      .map((row) => row.payload || row)
+      .filter((roll) => roll?.id)
+      .sort((a, b) => String(b.created_at || b.at || "").localeCompare(String(a.created_at || a.at || "")));
+    state.rolls = mergeById(state.rolls, remoteRolls).slice(0, 12);
+
+    if (!state.activeSheetId && user.sheetIds?.length) state.activeSheetId = user.sheetIds[0];
+    if (!state.activeCampaignId && user.campaignIds?.length) state.activeCampaignId = user.campaignIds[0];
+    const campaign = currentCampaign();
+    if (campaign && !state.activeSessionId) state.activeSessionId = campaign.sessoes[0]?.id || null;
+    syncCurrentSession();
+    localStorage.setItem("mesa-arcana", JSON.stringify(state));
+  } finally {
+    onlineLoadRunning = false;
+  }
+}
+
+function queueOnlineSave() {
+  if (onlineLoadRunning) return;
+  const user = currentUser();
+  if (!supabaseClient() || !user || user.id === "admin-master") return;
+  window.clearTimeout(onlineSaveTimer);
+  onlineSaveTimer = window.setTimeout(() => {
+    saveOnlineState().catch((error) => {
+      setSyncStatus(`Backup local salvo. Supabase falhou: ${error.message}`, true);
+    });
+  }, 900);
+}
+
+function userCampaignsForSave(user) {
+  if (!user) return [];
+  return state.campaigns.filter((campaign) => campaign.mestreId === user.id || user.role === "admin" || (user.campaignIds || []).includes(campaign.id) || (campaign.jogadores || []).includes(user.id));
+}
+
+function userSheetsForSave(user) {
+  if (!user) return [];
+  return state.sheets.filter((sheet) => (user.sheetIds || []).includes(sheet.id));
+}
+
+function listItemsFromText(text) {
+  return String(text || "")
+    .split(/\n|,/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+async function saveOnlineState() {
+  const client = supabaseClient();
+  const user = currentUser();
+  if (!client || !user || user.id === "admin-master" || onlineSaveRunning) return;
+  onlineSaveRunning = true;
+  try {
+    syncCurrentSession();
+    await saveOnlineUser(user);
+    const now = new Date().toISOString();
+    const campaigns = userCampaignsForSave(user).map((campaign) => ({
+      id: campaign.id,
+      owner_id: campaign.mestreId,
+      mestre_id: campaign.mestreId,
+      nome: campaign.nome,
+      invite_code: campaign.inviteCode,
+      objetivo_atual: currentSession()?.mission || campaign.sessoes?.[0]?.mission || "",
+      local_atual: state.map?.name || "",
+      payload: normalizeCampaignRecord(campaign),
+      updated_at: now
+    }));
+    const sheets = userSheetsForSave(user).map((sheet) => ({
+      id: sheet.id,
+      user_id: user.id,
+      campanha_id: state.campaigns.find((campaign) => (campaign.personagens || []).includes(sheet.id))?.id || null,
+      nome: sheet.name,
+      payload: normalizeSheet(sheet),
+      updated_at: now
+    }));
+    if (campaigns.length) {
+      const { error } = await client.from("campanhas").upsert(campaigns, { onConflict: "id" });
+      if (error) throw new Error(`campanhas: ${remoteErrorMessage(error)}`);
+    }
+    if (sheets.length) {
+      const { error } = await client.from("personagens").upsert(sheets, { onConflict: "id" });
+      if (error) throw new Error(`personagens: ${remoteErrorMessage(error)}`);
+    }
+
+    for (const sheet of userSheetsForSave(user)) {
+      await client.from("inventario").delete().eq("personagem_id", sheet.id).eq("user_id", user.id);
+      const items = listItemsFromText(sheet.inventory);
+      if (items.length) {
+        const { error } = await client.from("inventario").insert(items.map((name) => ({
+          user_id: user.id,
+          personagem_id: sheet.id,
+          nome: name,
+          payload: { name, inventoryText: sheet.inventory, stats: catalogStats[name] || null, savedAt: now },
+          updated_at: now
+        })));
+        if (error) throw new Error(`inventario: ${remoteErrorMessage(error)}`);
+      }
+      await client.from("anotacoes").delete().eq("personagem_id", sheet.id).eq("user_id", user.id);
+      if (sheet.notes || sheet.appearance || sheet.personality || sheet.history || sheet.objective) {
+        const { error } = await client.from("anotacoes").insert({
+          user_id: user.id,
+          personagem_id: sheet.id,
+          campanha_id: state.campaigns.find((campaign) => (campaign.personagens || []).includes(sheet.id))?.id || null,
+          titulo: `Anotacoes de ${sheet.name || "agente"}`,
+          conteudo: sheet.notes || "",
+          payload: {
+            notesText: sheet.notes || "",
+            appearance: sheet.appearance || "",
+            personality: sheet.personality || "",
+            history: sheet.history || "",
+            objective: sheet.objective || "",
+            savedAt: now
+          },
+          updated_at: now
+        });
+        if (error) throw new Error(`anotacoes: ${remoteErrorMessage(error)}`);
+      }
+    }
+
+    if (state.rolls.length) {
+      const { error } = await client.from("rolagens").upsert(state.rolls.map((roll) => ({
+        id: roll.id,
+        user_id: user.id,
+        campanha_id: state.activeCampaignId,
+        personagem_id: state.activeSheetId,
+        formula: roll.formula,
+        resultado: String(roll.displayTotal || roll.total || ""),
+        payload: { ...roll, created_at: now },
+        created_at: now
+      })), { onConflict: "id" });
+      if (error) throw new Error(`rolagens: ${remoteErrorMessage(error)}`);
+    }
+    setSyncStatus("Sincronizado com Supabase.");
+  } finally {
+    onlineSaveRunning = false;
+  }
+}
+
 function createCampaignForCurrentUser(name) {
   const user = currentUser();
   if (!user) throw new Error("Faca login primeiro.");
@@ -724,6 +1082,7 @@ function blankSheet(name = "Novo agente", player = "Local") {
 function save() {
   syncCurrentSession();
   localStorage.setItem("mesa-arcana", JSON.stringify(state));
+  queueOnlineSave();
 }
 
 function syncCurrentSession() {
@@ -2514,8 +2873,13 @@ function escapeHtml(value) {
   })[char]);
 }
 
-function saveCurrentFile() {
+async function saveCurrentFile() {
   save();
+  try {
+    await saveOnlineState();
+  } catch (error) {
+    setSyncStatus(`Arquivo local salvo. Falha online: ${error.message}`, true);
+  }
   document.querySelectorAll("[data-save-file], #saveFileButton").forEach((button) => {
     const original = button.dataset.originalText || button.textContent;
     button.dataset.originalText = original;
@@ -2709,10 +3073,16 @@ document.querySelectorAll("[data-tab]").forEach((tab) => {
   tab.addEventListener("click", () => switchTab(tab.dataset.tab));
 });
 
-document.querySelector("#loginForm")?.addEventListener("submit", (event) => {
+document.querySelector("#loginForm")?.addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
-    loginAccount(document.querySelector("#loginUser").value, document.querySelector("#loginPassword").value);
+    try {
+      await loginAccountOnline(document.querySelector("#loginUser").value, document.querySelector("#loginPassword").value);
+    } catch (onlineError) {
+      console.warn("[Supabase] Login online falhou, tentando backup local.", onlineError);
+      loginAccount(document.querySelector("#loginUser").value, document.querySelector("#loginPassword").value);
+      setSyncStatus("Login local ativo. Supabase nao carregou este acesso.", true);
+    }
     setAuthError("");
     showPortal();
   } catch (error) {
@@ -2728,15 +3098,26 @@ document.querySelector("#signupCancel")?.addEventListener("click", () => {
   hideSignup();
 });
 
-document.querySelector("#signupForm")?.addEventListener("submit", (event) => {
+document.querySelector("#signupForm")?.addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
-    createAccount(
-      document.querySelector("#signupUser").value,
-      document.querySelector("#signupEmail").value,
-      document.querySelector("#signupPassword").value,
-      document.querySelector("#signupConfirm").value
-    );
+    try {
+      await createAccountOnline(
+        document.querySelector("#signupUser").value,
+        document.querySelector("#signupEmail").value,
+        document.querySelector("#signupPassword").value,
+        document.querySelector("#signupConfirm").value
+      );
+    } catch (onlineError) {
+      console.warn("[Supabase] Criacao online falhou, criando backup local.", onlineError);
+      createAccount(
+        document.querySelector("#signupUser").value,
+        document.querySelector("#signupEmail").value,
+        document.querySelector("#signupPassword").value,
+        document.querySelector("#signupConfirm").value
+      );
+      setSyncStatus(`Conta local criada. Rode a migracao/verifique Supabase: ${onlineError.message}`, true);
+    }
     document.querySelector("#loginUser").value = document.querySelector("#signupUser").value;
     document.querySelector("#loginPassword").value = document.querySelector("#signupPassword").value;
     setAuthError("");
@@ -2748,11 +3129,17 @@ document.querySelector("#signupForm")?.addEventListener("submit", (event) => {
   }
 });
 
-document.querySelector("#inviteAccess")?.addEventListener("click", () => {
+document.querySelector("#inviteAccess")?.addEventListener("click", async () => {
   try {
-    loginAccount(document.querySelector("#loginUser").value, document.querySelector("#loginPassword").value);
+    try {
+      await loginAccountOnline(document.querySelector("#loginUser").value, document.querySelector("#loginPassword").value);
+    } catch (onlineError) {
+      console.warn("[Supabase] Convite com login online falhou, tentando local.", onlineError);
+      loginAccount(document.querySelector("#loginUser").value, document.querySelector("#loginPassword").value);
+    }
     const code = window.prompt("Codigo do convite:", "");
     if (code) joinCampaignWithInvite(code);
+    await saveOnlineState();
     setAuthError("");
     showPortal();
   } catch (error) {
@@ -2761,6 +3148,7 @@ document.querySelector("#inviteAccess")?.addEventListener("click", () => {
 });
 
 document.querySelector("#logoutButton")?.addEventListener("click", () => {
+  supabaseClient()?.auth?.signOut?.();
   state.currentUserId = null;
   save();
   showLogin();
@@ -2772,20 +3160,22 @@ document.querySelector("#backPortal")?.addEventListener("click", () => {
 
 document.querySelector("#saveFileButton")?.addEventListener("click", saveCurrentFile);
 
-document.querySelector("#createCampaignButton")?.addEventListener("click", () => {
+document.querySelector("#createCampaignButton")?.addEventListener("click", async () => {
   try {
     createCampaignForCurrentUser(document.querySelector("#newCampaignName").value.trim() || "Nova campanha");
     save();
+    await saveOnlineState();
     renderPortal();
   } catch (error) {
     window.alert(error.message);
   }
 });
 
-document.querySelector("#createSheetButton")?.addEventListener("click", () => {
+document.querySelector("#createSheetButton")?.addEventListener("click", async () => {
   try {
     createSheetForCurrentUser(document.querySelector("#newSheetName").value.trim() || "Novo agente");
     save();
+    await saveOnlineState();
     state.activeTab = "fichas";
     showApp("sheet");
   } catch (error) {
@@ -2793,10 +3183,11 @@ document.querySelector("#createSheetButton")?.addEventListener("click", () => {
   }
 });
 
-document.querySelector("#joinCampaignButton")?.addEventListener("click", () => {
+document.querySelector("#joinCampaignButton")?.addEventListener("click", async () => {
   try {
     joinCampaignWithInvite(document.querySelector("#inviteCode").value);
     save();
+    await saveOnlineState();
     renderPortal();
   } catch (error) {
     window.alert(error.message);
@@ -2950,9 +3341,35 @@ document.querySelectorAll("[data-roll]").forEach((button) => {
   });
 });
 
-load();
-if (!document.getElementById(state.activeTab)) state.activeTab = "mesa";
-renderAll();
-if (state.currentUserId && currentUser()) showPortal();
-else showLogin();
+async function bootApp() {
+  load();
+  if (!document.getElementById(state.activeTab)) state.activeTab = "mesa";
+  const client = supabaseClient();
+  if (client) {
+    try {
+      const { data } = await client.auth.getSession();
+      const authUser = data?.session?.user;
+      if (authUser) {
+        upsertLocalAccount({
+          id: authUser.id,
+          username: authUser.user_metadata?.username || authUser.email?.split("@")[0] || "agente",
+          email: authUser.email || "",
+          role: currentUser()?.role || "player",
+          sheetIds: currentUser()?.sheetIds || [],
+          campaignIds: currentUser()?.campaignIds || [],
+          online: true
+        });
+        state.currentUserId = authUser.id;
+        await loadOnlineWorkspace();
+      }
+    } catch (error) {
+      setSyncStatus(`Nao consegui restaurar sessao online: ${error.message}`, true);
+    }
+  }
+  renderAll();
+  if (state.currentUserId && currentUser()) showPortal();
+  else showLogin();
+}
+
+bootApp();
 

@@ -150,6 +150,7 @@
         </div>
 
         <div id="modeBadge" class="mode-switch danger-stamp">modo jogador</div>
+        <div id="syncStatus" class="sync-status">Modo local pronto.</div>
 
         <nav class="tabs archive-tabs" aria-label="Arquivo">
           <button class="tab menu-button active" data-tab="mesa" type="button"><span>▣</span>Mapa</button>
@@ -497,7 +498,9 @@
         </section>
       </section>
     </main>
-    <script src="archive-panels.js"></script>
-    <script src="app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="./supabaseClient.js"></script>
+    <script src="./archive-panels.js"></script>
+    <script src="./app.js"></script>
   </body>
 </html>
