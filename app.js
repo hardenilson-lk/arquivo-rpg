@@ -17,6 +17,8 @@ const state = {
   selectedToken: null
 };
 
+let viewCellSize = null;
+
 const els = {
   battlefield: document.querySelector("#battlefield"),
   diceStage: document.querySelector("#diceStage"),
@@ -62,6 +64,7 @@ const els = {
   chatForm: document.querySelector("#chatForm"),
   chatText: document.querySelector("#chatText"),
   syncStatus: document.querySelector("#syncStatus"),
+  sidebarToggle: document.querySelector("#sidebarToggle"),
   rollResult: document.querySelector("#rollResult"),
   rollLog: document.querySelector("#rollLog")
 };
@@ -440,11 +443,11 @@ function normalizeMap(map = {}) {
   const fog = { ...defaultFog(), ...(map.fog || {}) };
   return {
     name: map.name || "Mapa inicial",
-    cols: clamp(Number(map.cols), 6, 30),
-    rows: clamp(Number(map.rows), 6, 24),
+    cols: clamp(Number(map.cols), 6, 100),
+    rows: clamp(Number(map.rows), 6, 100),
     darkness: clamp(Number(map.darkness ?? 50), 0, 90),
     lightsOn: map.lightsOn !== false,
-    cellSize: clamp(Number(map.cellSize ?? 56), 34, 88),
+    cellSize: clamp(Number(map.cellSize ?? 48), 18, 64),
     gridOpacity: clamp(Number(map.gridOpacity ?? 38), 0, 100),
     gridColor: map.gridColor || "#debc79",
     background: { ...defaultMapBackground(), ...(map.background || {}) },
@@ -877,6 +880,19 @@ async function saveOnlineState() {
   }
 }
 
+async function deleteOnlineSheet(sheetId) {
+  const client = supabaseClient();
+  const user = currentUser();
+  if (!client || !user || user.id === "admin-master") return;
+  const inventory = await client.from("inventario").delete().eq("personagem_id", sheetId).eq("user_id", user.id);
+  if (inventory.error) throw new Error(`inventario: ${remoteErrorMessage(inventory.error)}`);
+  const notes = await client.from("anotacoes").delete().eq("personagem_id", sheetId).eq("user_id", user.id);
+  if (notes.error) throw new Error(`anotacoes: ${remoteErrorMessage(notes.error)}`);
+  const sheet = await client.from("personagens").delete().eq("id", sheetId).eq("user_id", user.id);
+  if (sheet.error) throw new Error(`personagens: ${remoteErrorMessage(sheet.error)}`);
+  console.log("[Supabase] Ficha apagada online:", sheetId);
+}
+
 function createCampaignForCurrentUser(name) {
   const user = currentUser();
   if (!user) throw new Error("Faca login primeiro.");
@@ -1073,6 +1089,7 @@ function tokenFromSheet(sheet, index = 0) {
     type: "player",
     label: sheet.className || "Personagem",
     color: index % 2 ? "#8b5cf6" : "#2f7ed8",
+    portrait: sheet.portrait || "",
     light: inventoryVisionBonus(sheet),
     hidden: false,
     x: 2 + (index % 5) * 2,
@@ -1133,6 +1150,7 @@ function applySessionToTable(session) {
 function defaultSheet() {
   return {
     id: crypto.randomUUID(),
+    portrait: "",
     name: "Lia Duarte",
     role: "Academica",
         player: "Local",
@@ -1173,6 +1191,7 @@ function defaultSheet() {
 function blankSheet(name = "Novo agente", player = "Local") {
   return {
     id: crypto.randomUUID(),
+    portrait: "",
     name,
     player,
     role: "",
@@ -1270,7 +1289,7 @@ function renderControls() {
 
 function renderGrid() {
   state.map = normalizeMap(state.map);
-  document.documentElement.style.setProperty("--cell-size", `${state.map.cellSize}px`);
+  document.documentElement.style.setProperty("--cell-size", `${viewCellSize || state.map.cellSize}px`);
   els.battlefield.style.setProperty("--cols", state.map.cols);
   els.battlefield.style.setProperty("--rows", state.map.rows);
   els.battlefield.style.setProperty("--darkness", state.map.darkness / 100);
@@ -1299,25 +1318,69 @@ function renderGrid() {
 
   state.tokens.filter((token) => state.currentMode === "master" || !token.hidden).forEach((token) => {
     const piece = document.createElement("div");
-    piece.className = `token${state.selectedToken === token.id ? " selected" : ""}${token.hidden ? " token-hidden" : ""}${token.type === "npc" ? " npc-token" : ""}`;
+    const controllable = canControlToken(token);
+    piece.className = `token${state.selectedToken === token.id ? " selected" : ""}${token.hidden ? " token-hidden" : ""}${token.type === "npc" ? " npc-token" : ""}${controllable ? "" : " token-locked"}`;
     piece.style.left = `calc(${token.x} * var(--cell-size))`;
     piece.style.top = `calc(${token.y} * var(--cell-size))`;
-    piece.style.background = token.color;
-    piece.style.color = token.color;
-    piece.textContent = initials(token.name);
-    piece.title = `${token.name} | luz ${token.light}${token.hidden ? " | invisivel" : ""}`;
-    piece.draggable = true;
+    if (token.portrait) {
+      piece.classList.add("token-portrait");
+      piece.style.backgroundImage = `url("${token.portrait}")`;
+      piece.innerHTML = tokenBars(token);
+    } else {
+      piece.style.background = token.color;
+      piece.style.color = token.color;
+      piece.innerHTML = `<span class="token-initials">${escapeHtml(initials(token.name))}</span>${tokenBars(token)}`;
+    }
+    piece.title = `${token.name} | luz ${token.light}${token.hidden ? " | invisivel" : ""}${controllable ? " | duplo clique: dano/cura" : ""}`;
+    piece.draggable = controllable;
     piece.addEventListener("click", (event) => {
       event.stopPropagation();
+      if (!controllable) return;
       state.selectedToken = token.id;
       renderAll();
     });
+    piece.addEventListener("dblclick", (event) => {
+      event.stopPropagation();
+      if (!controllable) return;
+      promptTokenDamage(token.id);
+    });
     piece.addEventListener("dragstart", (event) => {
+      if (!controllable) {
+        event.preventDefault();
+        return;
+      }
       state.selectedToken = token.id;
       event.dataTransfer.setData("text/plain", token.id);
     });
     els.battlefield.append(piece);
   });
+}
+
+function tokenBars(token) {
+  return `
+    <span class="token-bars" aria-hidden="true">
+      ${miniTokenBar(token.hp, token.hpMax, "hp")}
+      ${miniTokenBar(token.pe, token.peMax, "pe")}
+      ${miniTokenBar(token.san, token.sanMax, "san")}
+    </span>
+  `;
+}
+
+function miniTokenBar(current, max, type) {
+  const safeMax = Math.max(Number(max) || 1, 1);
+  const safeCurrent = Math.max(0, Math.min(safeMax, Number(current) || 0));
+  const pct = Math.round((safeCurrent / safeMax) * 100);
+  return `<i class="token-bar ${type}" style="--token-bar:${pct}%"></i>`;
+}
+
+function promptTokenDamage(tokenId) {
+  const token = state.tokens.find((item) => item.id === tokenId);
+  if (!canControlToken(token)) return;
+  const raw = window.prompt(`Dano em ${token.name}. Use numero negativo para curar:`, "1");
+  if (raw === null) return;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value === 0) return;
+  applyTokenDamage(tokenId, Math.abs(value), value < 0 ? "heal" : "damage");
 }
 
 function renderMapBackground() {
@@ -1431,6 +1494,7 @@ function hideFogAt(x, y, radius = 1) {
 
 function handleMapCellClick(x, y) {
   const tool = state.map.tool || "move";
+  if (!isMasterMode() && tool !== "move") return;
   if (tool === "move") {
     moveSelectedToken(x, y);
     return;
@@ -1465,7 +1529,7 @@ function initials(name) {
 
 function moveSelectedToken(x, y) {
   const token = state.tokens.find((item) => item.id === state.selectedToken);
-  if (!token) return;
+  if (!canControlToken(token)) return;
   token.x = x;
   token.y = y;
   renderAll();
@@ -1474,6 +1538,7 @@ function moveSelectedToken(x, y) {
 function renderTokenList() {
   els.tokenList.innerHTML = "";
   state.tokens.filter((token) => state.currentMode === "master" || !token.hidden).forEach((token) => {
+    const canEdit = canControlToken(token);
     const row = document.createElement("div");
     row.className = `token-item${token.hidden ? " hidden-token-row" : ""}`;
     row.innerHTML = `
@@ -1482,6 +1547,7 @@ function renderTokenList() {
         <small>${escapeHtml(token.label || (token.type === "npc" ? "NPC/Criatura" : "Personagem"))} | ${token.x + 1},${token.y + 1}${token.hidden ? " | invisivel" : ""}</small>
       </div>
       <span>PV ${escapeHtml(token.hp ?? "?")} / ${escapeHtml(token.hpMax ?? "?")}<br>Luz ${escapeHtml(token.light)}</span>
+      ${canEdit ? `<div class="damage-inline"><input data-token-damage="${escapeAttr(token.id)}" type="number" min="0" placeholder="Dano" /><button type="button" data-token-damage-apply="${escapeAttr(token.id)}">Dano</button><button type="button" data-token-heal-apply="${escapeAttr(token.id)}">Cura</button></div>` : ""}
     `;
     const toggle = document.createElement("button");
     toggle.type = "button";
@@ -1501,6 +1567,18 @@ function renderTokenList() {
     });
     row.append(toggle, remove);
     els.tokenList.append(row);
+  });
+  els.tokenList.querySelectorAll("[data-token-damage-apply]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const input = els.tokenList.querySelector(`[data-token-damage="${selectorEscape(button.dataset.tokenDamageApply)}"]`);
+      applyTokenDamage(button.dataset.tokenDamageApply, Number(input?.value || 0), "damage");
+    });
+  });
+  els.tokenList.querySelectorAll("[data-token-heal-apply]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const input = els.tokenList.querySelector(`[data-token-damage="${selectorEscape(button.dataset.tokenHealApply)}"]`);
+      applyTokenDamage(button.dataset.tokenHealApply, Number(input?.value || 0), "heal");
+    });
   });
 }
 
@@ -1524,9 +1602,26 @@ function renderMasterShield() {
           ${shieldBar("SAN", sheet.san, sheet.sanMax, "#7c3bd1")}
         </div>
         <small>Def ${escapeHtml(sheet.defense ?? 10)} | Luz ${escapeHtml(token?.light ?? inventoryVisionBonus(sheet))} | ${token ? `Token ${token.x + 1},${token.y + 1}` : "Sem token"}</small>
+        <div class="damage-inline">
+          <input data-shield-damage="${escapeAttr(sheet.id)}" type="number" min="0" placeholder="Dano" />
+          <button type="button" data-shield-damage-apply="${escapeAttr(sheet.id)}">Dano</button>
+          <button type="button" data-shield-heal-apply="${escapeAttr(sheet.id)}">Cura</button>
+        </div>
       </article>
     `;
   }).join("");
+  els.masterShield.querySelectorAll("[data-shield-damage-apply]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const input = els.masterShield.querySelector(`[data-shield-damage="${selectorEscape(button.dataset.shieldDamageApply)}"]`);
+      applySheetDamage(button.dataset.shieldDamageApply, Number(input?.value || 0), "damage");
+    });
+  });
+  els.masterShield.querySelectorAll("[data-shield-heal-apply]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const input = els.masterShield.querySelector(`[data-shield-damage="${selectorEscape(button.dataset.shieldHealApply)}"]`);
+      applySheetDamage(button.dataset.shieldHealApply, Number(input?.value || 0), "heal");
+    });
+  });
 }
 
 function shieldBar(label, current, max, color) {
@@ -1594,6 +1689,11 @@ function renderCrisisSheet() {
 
       <div class="dossier-left">
         <div class="dossier-identity">
+          <div class="profile-photo-box">
+            <div class="profile-photo-preview" style="${sheet.portrait ? `background-image:url('${escapeAttr(sheet.portrait)}')` : ""}">${sheet.portrait ? "" : escapeHtml(initials(sheet.name || "AG"))}</div>
+            <label>Foto do agente <input data-profile-photo type="file" accept="image/*" /></label>
+            ${sheet.portrait ? `<button type="button" data-clear-profile-photo>Remover foto</button>` : ""}
+          </div>
           <label>Personagem <input data-sheet-field="name" value="${escapeAttr(sheet.name || "Agente")}" /></label>
           <label>Jogador <input data-sheet-field="player" value="${escapeAttr(sheet.player)}" /></label>
         </div>
@@ -1632,6 +1732,11 @@ function renderCrisisSheet() {
           <label class="paper-stat"><b>Protecao</b><small>Reducao de dano</small><input data-sheet-field="block" type="number" value="${sheet.block}" /></label>
           ${paperStatBox("Sanidade", "Resistencia mental", "san", "sanMax", sheet.san, sheet.sanMax)}
           <label class="paper-stat"><b>Esquiva</b><small>Ajuste defensivo</small><input data-sheet-field="dodge" type="number" value="${sheet.dodge}" /></label>
+        </div>
+        <div class="sheet-damage-tools">
+          <label>Dano ou cura <input data-sheet-damage-value type="number" min="0" placeholder="0" /></label>
+          <button type="button" data-sheet-damage-apply>Dano</button>
+          <button type="button" data-sheet-heal-apply>Cura</button>
         </div>
       </div>
 
@@ -1708,6 +1813,24 @@ function renderCrisisSheet() {
 
   els.crisisSheet.querySelectorAll("[data-open-catalog]").forEach((button) => {
     button.addEventListener("click", () => openCatalog(button.dataset.openCatalog));
+  });
+
+  els.crisisSheet.querySelector("[data-profile-photo]")?.addEventListener("change", (event) => {
+    uploadProfilePhoto(event.target.files?.[0]);
+  });
+
+  els.crisisSheet.querySelector("[data-clear-profile-photo]")?.addEventListener("click", () => {
+    updateActiveSheet("portrait", "");
+  });
+
+  els.crisisSheet.querySelector("[data-sheet-damage-apply]")?.addEventListener("click", () => {
+    const value = Number(els.crisisSheet.querySelector("[data-sheet-damage-value]")?.value || 0);
+    applySheetDamage(sheet.id, value, "damage");
+  });
+
+  els.crisisSheet.querySelector("[data-sheet-heal-apply]")?.addEventListener("click", () => {
+    const value = Number(els.crisisSheet.querySelector("[data-sheet-damage-value]")?.value || 0);
+    applySheetDamage(sheet.id, value, "heal");
   });
 
   els.crisisSheet.querySelectorAll("[data-remove-line]").forEach((button) => {
@@ -1883,6 +2006,7 @@ function addCatalogEntry(field, entry) {
   const safeDesc = entry.desc.replace(/[,;\n]/g, " ");
   const line = `${entry.name} | ${catalogMetaText(entry)} - ${safeDesc}`.replace(/[,;\n]/g, " ");
   sheet[field] = splitLines(sheet[field]).concat(line).join("\n");
+  if (["inventory", "abilities", "rituals"].includes(field)) recalculateDerivedStats(sheet, field);
   renderAll();
 }
 
@@ -2373,20 +2497,156 @@ function removeSheetLine(field, index) {
   const lines = splitLines(sheet[field]);
   lines.splice(index, 1);
   sheet[field] = lines.join("\n");
+  recalculateDerivedStats(sheet);
   renderAll();
+}
+
+function classBaseStats(sheet) {
+  const className = normalizeKey(sheet.className);
+  if (className === "combatente") return { hp: 20, san: 12 };
+  if (className === "ocultista") return { hp: 12, san: 20 };
+  return { hp: 16, san: 16 };
+}
+
+function inventoryMechanicalBonuses(sheet) {
+  return splitLines(sheet.inventory).reduce((bonus, raw) => {
+    const item = parseInventoryItem(raw);
+    const defenseText = String(item.stats.defense || "");
+    const defense = Number(defenseText.match(/[+-]?\d+/)?.[0] || 0);
+    const key = normalizeKey(item.name);
+    if (defense > 0) {
+      bonus.defense += defense;
+      bonus.block += Math.max(1, Math.floor(defense / 5));
+    }
+    if (key.includes("lanterna tatica")) bonus.light = Math.max(bonus.light, 6);
+    else if (key.includes("lanterna")) bonus.light = Math.max(bonus.light, 5);
+    if (key.includes("binoculos")) bonus.vision += 2;
+    return bonus;
+  }, { defense: 0, block: 0, light: 0, vision: 0 });
+}
+
+function recalculateDerivedStats(sheet, changedField = "") {
+  if (!sheet) return sheet;
+  const base = classBaseStats(sheet);
+  const itemBonus = inventoryMechanicalBonuses(sheet);
+  const maxHp = Math.max(1, base.hp + Number(sheet.vig || 0));
+  const maxPe = Math.max(1, 1 + Number(sheet.pre || 0) + Math.floor(parseNex(sheet.nex) / 20));
+  const maxSan = Math.max(1, base.san + Math.floor(parseNex(sheet.nex) / 10));
+  const defense = 10 + Number(sheet.agi || 0) + itemBonus.defense;
+  const dodge = defense + Number(parseSkills(sheet).find((skill) => normalizeKey(skill.name) === "reflexos")?.total || 0);
+  const preserveCurrent = (field, maxField, newMax) => {
+    const current = Number(sheet[field]);
+    const oldMax = Number(sheet[maxField]);
+    sheet[maxField] = newMax;
+    if (!Number.isFinite(current) || current <= 0 || current === oldMax || current > newMax || changedField === maxField) {
+      sheet[field] = newMax;
+    }
+  };
+  preserveCurrent("hp", "hpMax", maxHp);
+  preserveCurrent("pe", "peMax", maxPe);
+  preserveCurrent("san", "sanMax", maxSan);
+  sheet.defense = defense;
+  sheet.block = Math.max(Number(sheet.block) || 0, itemBonus.block);
+  sheet.dodge = dodge;
+  syncSheetToken(sheet);
+  return sheet;
 }
 
 function updateActiveSheet(field, value, numeric = false, rerender = true) {
   const sheet = ensureActiveSheet();
   sheet[field] = numeric ? Number(value) : value;
+  if (["agi", "str", "int", "pre", "vig", "className", "pathName", "nex", "inventory", "skills"].includes(field)) {
+    recalculateDerivedStats(sheet, field);
+  } else if (["portrait", "name", "className", "hp", "hpMax", "pe", "peMax", "san", "sanMax"].includes(field)) {
+    syncSheetToken(sheet);
+  }
   if (rerender) renderAll();
   else save();
+}
+
+function syncSheetToken(sheet = ensureActiveSheet()) {
+  const statValue = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
+  state.tokens.forEach((token) => {
+    if (token.sheetId !== sheet.id) return;
+    token.name = sheet.name || token.name;
+    token.label = sheet.className || token.label;
+    token.portrait = sheet.portrait || "";
+    token.hp = statValue(sheet.hp, token.hp);
+    token.hpMax = statValue(sheet.hpMax, token.hpMax);
+    token.pe = statValue(sheet.pe, token.pe);
+    token.peMax = statValue(sheet.peMax, token.peMax);
+    token.san = statValue(sheet.san, token.san);
+    token.sanMax = statValue(sheet.sanMax, token.sanMax);
+  });
+  const campaign = currentCampaign();
+  campaign?.sessoes?.forEach((session) => {
+    session.tokens = (session.tokens || []).map((token) => token.sheetId === sheet.id ? {
+      ...token,
+      name: sheet.name || token.name,
+      label: sheet.className || token.label,
+      portrait: sheet.portrait || "",
+      hp: statValue(sheet.hp, token.hp),
+      hpMax: statValue(sheet.hpMax, token.hpMax),
+      pe: statValue(sheet.pe, token.pe),
+      peMax: statValue(sheet.peMax, token.peMax),
+      san: statValue(sheet.san, token.san),
+      sanMax: statValue(sheet.sanMax, token.sanMax)
+    } : token);
+  });
+}
+
+function canEditSheetVitals(sheetId) {
+  const user = currentUser();
+  if (isMasterMode()) return true;
+  return Boolean(user && (user.sheetIds || []).includes(sheetId));
+}
+
+function applySheetDamage(sheetId, amount, mode = "damage") {
+  const value = Math.max(0, Number(amount) || 0);
+  if (!value) return;
+  const sheet = state.sheets.find((item) => item.id === sheetId);
+  if (!sheet || !canEditSheetVitals(sheet.id)) return;
+  const max = Math.max(Number(sheet.hpMax) || Number(sheet.hp) || 1, 1);
+  const current = Math.max(0, Number(sheet.hp) || 0);
+  const protection = Math.max(0, Number(sheet.block) || 0);
+  const finalDamage = mode === "damage" ? Math.max(0, value - protection) : value;
+  sheet.hp = mode === "heal" ? Math.min(max, current + value) : Math.max(0, current - finalDamage);
+  syncSheetToken(sheet);
+  renderAll();
+}
+
+function applyTokenDamage(tokenId, amount, mode = "damage") {
+  const value = Math.max(0, Number(amount) || 0);
+  if (!value) return;
+  const token = state.tokens.find((item) => item.id === tokenId);
+  if (!canControlToken(token)) return;
+  if (token.sheetId) {
+    applySheetDamage(token.sheetId, value, mode);
+    return;
+  }
+  const max = Math.max(Number(token.hpMax) || Number(token.hp) || 1, 1);
+  const current = Math.max(0, Number(token.hp) || 0);
+  token.hp = mode === "heal" ? Math.min(max, current + value) : Math.max(0, current - value);
+  syncCurrentSession();
+  renderAll();
+}
+
+function uploadProfilePhoto(file) {
+  if (!file) return;
+  if (!file.type.startsWith("image/")) {
+    window.alert("Escolha um arquivo de imagem.");
+    return;
+  }
+  const reader = new FileReader();
+  reader.addEventListener("load", () => updateActiveSheet("portrait", reader.result || ""));
+  reader.readAsDataURL(file);
 }
 
 function updateSkillMod(skill, field, value, rerender = true) {
   const sheet = ensureActiveSheet();
   sheet.skillMods = sheet.skillMods || {};
   sheet.skillMods[skill] = { ...(sheet.skillMods[skill] || {}), [field]: value };
+  recalculateDerivedStats(sheet, "skills");
   if (rerender) renderAll();
   else save();
 }
@@ -2408,6 +2668,7 @@ function addSheetLine(field) {
   if (!value) return;
   const sheet = ensureActiveSheet();
   sheet[field] = splitLines(sheet[field]).concat(value).join("\n");
+  if (["inventory", "abilities", "rituals"].includes(field)) recalculateDerivedStats(sheet, field);
   renderAll();
 }
 
@@ -2462,6 +2723,19 @@ function activeUserSheet() {
   return state.sheets[index];
 }
 
+function isMasterMode() {
+  const user = currentUser();
+  const campaign = currentCampaign();
+  return state.currentMode === "master" && user && (user.role === "admin" || campaign?.mestreId === user.id);
+}
+
+function canControlToken(token) {
+  if (!token) return false;
+  if (isMasterMode()) return true;
+  const user = currentUser();
+  return Boolean(token.sheetId && (user?.sheetIds || []).includes(token.sheetId));
+}
+
 function formatBonus(value) {
   return Number(value) > 0 ? `+${value}` : String(value);
 }
@@ -2472,6 +2746,11 @@ function formatSigned(value) {
 
 function escapeAttr(value) {
   return escapeHtml(value).replace(/`/g, "&#96;");
+}
+
+function selectorEscape(value) {
+  if (window.CSS?.escape) return CSS.escape(String(value));
+  return String(value).replace(/["\\]/g, "\\$&");
 }
 
 function resourceBar(label, field, maxField, current, max, type) {
@@ -2509,8 +2788,8 @@ function splitLines(text) {
 
 function resizeGrid() {
   state.map.name = els.mapName.value.trim() || "Mapa sem nome";
-  state.map.cols = clamp(Number(els.gridCols.value), 6, 30);
-  state.map.rows = clamp(Number(els.gridRows.value), 6, 24);
+  state.map.cols = clamp(Number(els.gridCols.value), 6, 100);
+  state.map.rows = clamp(Number(els.gridRows.value), 6, 100);
   state.tokens.forEach((token) => {
     token.x = Math.min(token.x, state.map.cols - 1);
     token.y = Math.min(token.y, state.map.rows - 1);
@@ -2546,6 +2825,34 @@ function centerMapBackground() {
   state.map.background.y = 0;
   state.map.background.rotation = 0;
   renderAll();
+}
+
+function fitGridToView() {
+  state.map = normalizeMap(state.map);
+  const wrap = document.querySelector(".battlefield-wrap");
+  if (!wrap) return;
+  const width = Math.max(320, wrap.clientWidth - 28);
+  const height = Math.max(260, Math.min(wrap.clientHeight || window.innerHeight * 0.64, window.innerHeight * 0.64) - 28);
+  const byWidth = Math.floor(width / state.map.cols);
+  const byHeight = Math.floor(height / state.map.rows);
+  viewCellSize = clamp(Math.min(byWidth, byHeight), 14, 64);
+  renderGrid();
+}
+
+function setGridZoom(size) {
+  state.map = normalizeMap(state.map);
+  viewCellSize = clamp(Number(size) || state.map.cellSize, 14, 96);
+  renderGrid();
+}
+
+function zoomGrid(delta) {
+  const current = viewCellSize || state.map.cellSize || 48;
+  setGridZoom(current + delta);
+}
+
+function resetGridZoom() {
+  viewCellSize = null;
+  renderGrid();
 }
 
 function removeMapBackground() {
@@ -2744,6 +3051,7 @@ function saveSheet(event) {
 function normalizeSheet(sheet) {
   return {
     id: sheet.id || crypto.randomUUID(),
+    portrait: sheet.portrait || "",
     name: sheet.name || "",
     player: sheet.player || "Local",
     role: sheet.role || "",
@@ -2884,7 +3192,7 @@ function performRoll(formula) {
     animateDiceRoll(result);
     window.setTimeout(() => {
       els.rollResult.textContent = result.rollMode === "d20-test" ? `Resultado final: ${result.finalTotal}` : result.displayTotal;
-    }, 780);
+    }, 460);
     state.rolls.unshift({ ...result, id: crypto.randomUUID(), at: new Date().toLocaleTimeString("pt-BR") });
     state.rolls = state.rolls.slice(0, 12);
     renderRollLog();
@@ -2917,6 +3225,7 @@ function playDiceSound() {
 
 function animateDiceRoll(result) {
   els.diceStage.innerHTML = "";
+  els.diceStage.className = `dice-stage ${rollSpecialClass(result)}`;
   const stageRect = els.diceStage.getBoundingClientRect();
   const width = Math.max(stageRect.width, 320);
   const height = Math.max(stageRect.height, 240);
@@ -2924,7 +3233,7 @@ function animateDiceRoll(result) {
 
   visibleDice.forEach((die, index) => {
     const node = document.createElement("div");
-    const dieSize = die.sides <= 6 ? 58 : die.sides >= 12 ? 66 : 62;
+    const dieSize = die.sides <= 6 ? 46 : die.sides >= 12 ? 54 : 50;
     const startX = 20 + (index % 4) * 18;
     const startY = height - 82 - (index % 3) * 22;
     const endX = Math.max(24, Math.min(width - dieSize - 24, width * (0.34 + seededRandom(index, result.seed) * 0.42)));
@@ -2944,10 +3253,25 @@ function animateDiceRoll(result) {
   });
 
   const total = document.createElement("div");
-  total.className = "dice-total persistent-total";
-  const headline = result.rollMode === "d20-test" ? result.displayTotal : result.rollMode === "rps" ? result.displayTotal : "Resultados";
+  total.className = `dice-total persistent-total result-sweep ${rollSpecialClass(result)}`;
+  const specialLabel = rollSpecialLabel(result);
+  const headline = specialLabel || (result.rollMode === "d20-test" ? `Resultado ${result.displayTotal}` : result.rollMode === "rps" ? result.displayTotal : "Resultados");
   total.innerHTML = `<strong>${escapeHtml(headline)}</strong><span>${escapeHtml(result.formula)} | ${escapeHtml(result.detail)}</span>`;
   els.diceStage.append(total);
+}
+
+function rollSpecialClass(result) {
+  if (result?.narrative === "sucesso critico") return "roll-critical";
+  if (result?.narrative === "falha critica") return "roll-fumble";
+  if (String(result?.narrative || "").includes("anulou")) return "roll-unstable";
+  return "";
+}
+
+function rollSpecialLabel(result) {
+  if (result?.narrative === "sucesso critico") return "SUCESSO CRITICO";
+  if (result?.narrative === "falha critica") return "FALHA CRITICA";
+  if (String(result?.narrative || "").includes("anulou")) return "SUCESSO INSTAVEL";
+  return "";
 }
 
 function seededRandom(seed, salt) {
@@ -3045,6 +3369,7 @@ function showApp(mode = state.currentMode || "player") {
   if (mode === "sheet") state.activeTab = ["fichas", "inventario", "anotacoes"].includes(state.activeTab) ? state.activeTab : "fichas";
   renderAll();
   switchTab(state.activeTab || "mesa");
+  if (state.activeTab === "mesa") window.setTimeout(fitGridToView, 60);
 }
 
 function renderPortal() {
@@ -3134,9 +3459,15 @@ function renderPortal() {
     });
   });
   document.querySelectorAll("[data-delete-sheet]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
       if (!window.confirm("Apagar esta ficha salva?")) return;
       const id = button.dataset.deleteSheet;
+      try {
+        await deleteOnlineSheet(id);
+        setSyncStatus("Ficha apagada do Supabase.");
+      } catch (error) {
+        setSyncStatus(`Ficha apagada localmente. Falha ao apagar online: ${error.message}`, true);
+      }
       user.sheetIds = (user.sheetIds || []).filter((sheetId) => sheetId !== id);
       state.sheets = state.sheets.filter((sheet) => sheet.id !== id);
       state.campaigns.forEach((campaign) => {
@@ -3298,6 +3629,14 @@ document.querySelector("#backPortal")?.addEventListener("click", () => {
   showPortal();
 });
 
+els.sidebarToggle?.addEventListener("click", () => {
+  const shell = document.querySelector("#appShell");
+  if (!shell) return;
+  const collapsed = shell.classList.toggle("sidebar-collapsed");
+  els.sidebarToggle.setAttribute("aria-expanded", String(!collapsed));
+  els.sidebarToggle.textContent = collapsed ? "☰ Menu" : "× Fechar";
+});
+
 document.querySelector("#saveFileButton")?.addEventListener("click", saveCurrentFile);
 
 document.querySelector("#createCampaignButton")?.addEventListener("click", async () => {
@@ -3333,6 +3672,17 @@ document.querySelector("#joinCampaignButton")?.addEventListener("click", async (
   }
 });
 
+document.querySelector("#portalRefreshCampaignButton")?.addEventListener("click", async () => {
+  try {
+    await refreshActiveCampaignFromSupabase({ rerender: false });
+    renderPortal();
+    setSyncStatus("Campanha atualizada no portal.");
+  } catch (error) {
+    setSyncStatus(`Nao consegui atualizar campanha online: ${error.message}`, true);
+    window.alert(error.message);
+  }
+});
+
 document.querySelector("#openMasterPanel")?.addEventListener("click", async () => {
   const campaign = currentCampaign() || state.campaigns[0];
   const user = currentUser();
@@ -3353,14 +3703,17 @@ document.querySelector("#openMasterPanel")?.addEventListener("click", async () =
   showApp("master");
 });
 
-document.querySelector("#refreshCampaignButton")?.addEventListener("click", async () => {
+async function refreshCampaignAction() {
   try {
     await refreshActiveCampaignFromSupabase({ rerender: true });
   } catch (error) {
     setSyncStatus(`Nao consegui atualizar campanha online: ${error.message}`, true);
     window.alert(error.message);
   }
-});
+}
+
+document.querySelector("#refreshCampaignButton")?.addEventListener("click", refreshCampaignAction);
+document.querySelector("#topRefreshCampaignButton")?.addEventListener("click", refreshCampaignAction);
 
 document.querySelector("#openPlayerPanel")?.addEventListener("click", () => {
   const campaign = currentCampaign() || state.campaigns[0];
@@ -3380,7 +3733,7 @@ els.battlefield.addEventListener("drop", (event) => {
   const x = clamp(Math.floor((event.clientX - rect.left + els.battlefield.parentElement.scrollLeft) / cellSize), 0, state.map.cols - 1);
   const y = clamp(Math.floor((event.clientY - rect.top + els.battlefield.parentElement.scrollTop) / cellSize), 0, state.map.rows - 1);
   const token = state.tokens.find((item) => item.id === event.dataTransfer.getData("text/plain"));
-  if (token) {
+  if (canControlToken(token)) {
     token.x = x;
     token.y = y;
     renderAll();
@@ -3390,9 +3743,10 @@ els.battlefield.addEventListener("drop", (event) => {
 document.querySelector("#resizeGrid").addEventListener("click", resizeGrid);
 document.querySelector("#addToken").addEventListener("click", addToken);
 document.querySelector("#quickResizeGrid")?.addEventListener("click", () => {
-  state.map.cols = clamp(Number(els.quickGridCols?.value || state.map.cols), 6, 30);
-  state.map.rows = clamp(Number(els.quickGridRows?.value || state.map.rows), 6, 24);
-  state.map.cellSize = clamp(Number(els.quickCellSize?.value || state.map.cellSize), 34, 88);
+  if (!isMasterMode()) return;
+  state.map.cols = clamp(Number(els.quickGridCols?.value || state.map.cols), 6, 100);
+  state.map.rows = clamp(Number(els.quickGridRows?.value || state.map.rows), 6, 100);
+  state.map.cellSize = clamp(Number(els.quickCellSize?.value || state.map.cellSize), 18, 64);
   state.map.gridOpacity = clamp(Number(els.quickGridOpacity?.value ?? state.map.gridOpacity), 0, 100);
   state.map.gridColor = els.quickGridColor?.value || state.map.gridColor;
   els.gridCols.value = state.map.cols;
@@ -3408,17 +3762,24 @@ document.querySelector("#quickResizeGrid")?.addEventListener("click", () => {
   });
   renderAll();
 });
-document.querySelector("#quickAddToken")?.addEventListener("click", () => addToken("quick"));
-document.querySelector("#quickAddNpc")?.addEventListener("click", addNpcToken);
+document.querySelector("#quickAddToken")?.addEventListener("click", () => {
+  if (isMasterMode()) addToken("quick");
+});
+document.querySelector("#quickAddNpc")?.addEventListener("click", () => {
+  if (isMasterMode()) addNpcToken();
+});
 els.mapTool?.addEventListener("change", () => {
+  if (!isMasterMode()) return;
   state.map.tool = els.mapTool.value;
   renderAll();
 });
 els.fogEnabled?.addEventListener("change", () => {
+  if (!isMasterMode()) return;
   state.map.fog = { ...defaultFog(), ...(state.map.fog || {}), enabled: els.fogEnabled.checked };
   renderAll();
 });
 document.querySelector("#revealAllFog")?.addEventListener("click", () => {
+  if (!isMasterMode()) return;
   state.map.fog = { ...defaultFog(), ...(state.map.fog || {}), enabled: true };
   const revealed = [];
   for (let y = 0; y < state.map.rows; y += 1) {
@@ -3428,14 +3789,31 @@ document.querySelector("#revealAllFog")?.addEventListener("click", () => {
   renderAll();
 });
 document.querySelector("#hideAllFog")?.addEventListener("click", () => {
+  if (!isMasterMode()) return;
   state.map.fog = { ...defaultFog(), ...(state.map.fog || {}), enabled: true, revealed: [] };
   renderAll();
 });
-els.mapImageInput?.addEventListener("change", () => uploadMapBackground(els.mapImageInput.files?.[0]));
-document.querySelector("#fitMapImage")?.addEventListener("click", fitMapBackground);
-document.querySelector("#centerMapImage")?.addEventListener("click", centerMapBackground);
-document.querySelector("#removeMapImage")?.addEventListener("click", removeMapBackground);
+els.mapImageInput?.addEventListener("change", () => {
+  if (isMasterMode()) uploadMapBackground(els.mapImageInput.files?.[0]);
+});
+document.querySelector("#fitMapImage")?.addEventListener("click", () => {
+  if (isMasterMode()) fitMapBackground();
+});
+document.querySelector("#centerMapImage")?.addEventListener("click", () => {
+  if (isMasterMode()) centerMapBackground();
+});
+document.querySelector("#fitGridToView")?.addEventListener("click", fitGridToView);
+document.querySelector("#zoomOutGrid")?.addEventListener("click", () => zoomGrid(-6));
+document.querySelector("#zoomInGrid")?.addEventListener("click", () => zoomGrid(6));
+document.querySelector("#resetGridZoom")?.addEventListener("click", resetGridZoom);
+window.addEventListener("resize", () => {
+  if (state.activeTab === "mesa") window.setTimeout(fitGridToView, 80);
+});
+document.querySelector("#removeMapImage")?.addEventListener("click", () => {
+  if (isMasterMode()) removeMapBackground();
+});
 document.querySelector("#lockMapImage")?.addEventListener("click", () => {
+  if (!isMasterMode()) return;
   state.map = normalizeMap(state.map);
   state.map.background.locked = !state.map.background.locked;
   renderAll();
@@ -3448,9 +3826,12 @@ document.querySelector("#lockMapImage")?.addEventListener("click", () => {
   [els.mapImageRotation, "rotation"],
   [els.mapImageOpacity, "opacity"]
 ].forEach(([input, field]) => {
-  input?.addEventListener("input", () => updateMapBackground(field, Number(input.value)));
+  input?.addEventListener("input", () => {
+    if (isMasterMode()) updateMapBackground(field, Number(input.value));
+  });
 });
 document.querySelector("#clearMap").addEventListener("click", () => {
+  if (!isMasterMode()) return;
   state.tokens = [];
   renderAll();
 });
@@ -3463,14 +3844,27 @@ els.darkness.addEventListener("input", () => {
   renderAll();
 });
 els.quickLightsOn?.addEventListener("change", () => {
+  if (!isMasterMode()) return;
   state.map.lightsOn = els.quickLightsOn.checked;
   els.lightsOn.checked = state.map.lightsOn;
   renderAll();
 });
 els.quickDarkness?.addEventListener("input", () => {
+  if (!isMasterMode()) return;
   state.map.darkness = Number(els.quickDarkness.value);
   els.darkness.value = state.map.darkness;
   renderAll();
+});
+document.querySelectorAll(".map-quick-tools details").forEach((details) => {
+  details.addEventListener("mouseenter", () => {
+    document.querySelectorAll(".map-quick-tools details").forEach((other) => {
+      if (other !== details) other.removeAttribute("open");
+    });
+    details.setAttribute("open", "");
+  });
+  details.addEventListener("mouseleave", () => {
+    details.removeAttribute("open");
+  });
 });
 els.sheetForm.addEventListener("submit", saveSheet);
 els.chatForm?.addEventListener("submit", (event) => {

@@ -109,9 +109,11 @@
       ["VIG", sheet.vig ?? 1]
     ];
     const token = state.tokens?.find((item) => item.name === sheet.name) || state.tokens?.[0];
+    const portrait = sheet.portrait || token?.portrait || "";
+    const portraitStyle = portrait ? ` style="background-image:url('${safeText(portrait)}')"` : "";
     cards.innerHTML = `
       <article class="character-card">
-        <div class="portrait-pin">${safeText(initials(sheet.name || token?.name || "Ari"))}</div>
+        <div class="portrait-pin${portrait ? " has-photo" : ""}"${portraitStyle}>${portrait ? "" : safeText(initials(sheet.name || token?.name || "Ari"))}</div>
         <div>
           <b>${safeText(sheet.name || token?.name || "Agente")}</b>
           <span>${safeText(sheet.className || "Investigador")} - ${safeText(sheet.nex || "5%")}</span>

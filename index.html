@@ -118,6 +118,7 @@
           </section>
           <section class="portal-card">
             <h2>Acesso rapido</h2>
+            <button id="portalRefreshCampaignButton" type="button">Atualizar campanha</button>
             <button id="openMasterPanel" class="primary" type="button">Pagina do mestre</button>
             <button id="openPlayerPanel" type="button">Pagina do jogador</button>
           </section>
@@ -135,7 +136,7 @@
       </div>
     </section>
 
-    <main id="appShell" class="app-shell archive-shell hidden">
+    <main id="appShell" class="app-shell archive-shell sidebar-collapsed hidden">
       <aside class="side-panel folder-sidebar paper-panel">
         <i class="paper-clip clip-sidebar" aria-hidden="true"></i>
         <div class="brand archive-brand">
@@ -181,11 +182,11 @@
           <div class="two-cols">
             <label>
               Largura
-              <input id="gridCols" type="number" min="6" max="30" />
+              <input id="gridCols" type="number" min="6" max="100" />
             </label>
             <label>
               Altura
-              <input id="gridRows" type="number" min="6" max="24" />
+              <input id="gridRows" type="number" min="6" max="100" />
             </label>
           </div>
           <button id="resizeGrid" class="primary" type="button">Aplicar grid</button>
@@ -226,6 +227,8 @@
 
       <section class="workspace archive-workspace">
         <header class="topbar archive-topbar">
+          <button id="sidebarToggle" class="sidebar-toggle" type="button" aria-expanded="false" aria-controls="appShell">☰ Menu</button>
+          <button id="topRefreshCampaignButton" class="sidebar-toggle master-only top-refresh-button" type="button">↻ Atualizar</button>
           <div>
             <p class="eyebrow">Campanha local</p>
             <h2 id="viewTitle">Mapa de combate</h2>
@@ -249,9 +252,9 @@
             <div class="map-quick-tools master-only">
               <details>
                 <summary>Grid</summary>
-                <label>Colunas <input id="quickGridCols" type="number" min="6" max="30" /></label>
-                <label>Linhas <input id="quickGridRows" type="number" min="6" max="24" /></label>
-                <label>Tam. casa <input id="quickCellSize" type="number" min="34" max="88" /></label>
+                <label>Colunas <input id="quickGridCols" type="number" min="6" max="100" /></label>
+                <label>Linhas <input id="quickGridRows" type="number" min="6" max="100" /></label>
+                <label>Tam. casa <input id="quickCellSize" type="number" min="18" max="64" /></label>
                 <label>Opacidade <input id="quickGridOpacity" type="range" min="0" max="100" /></label>
                 <label>Cor <input id="quickGridColor" type="color" /></label>
                 <button id="quickResizeGrid" type="button">Aplicar</button>
@@ -319,9 +322,12 @@
               <div id="diceStage" class="dice-stage" aria-live="polite"></div>
             </div>
             <div class="map-tools">
+              <button id="zoomOutGrid" type="button" class="mini-tab" title="Diminuir zoom">-</button>
+              <button id="resetGridZoom" type="button" class="mini-tab" title="Zoom 100%">100%</button>
+              <button id="zoomInGrid" type="button" class="mini-tab" title="Aumentar zoom">+</button>
               <button type="button" data-tab="configuracoes" class="tab mini-tab">Grid</button>
               <button type="button" data-tab="configuracoes" class="tab mini-tab">Luz</button>
-              <button type="button" data-tab="mesa" class="mini-tab">Centralizar</button>
+              <button id="fitGridToView" type="button" class="mini-tab">Ajustar tela</button>
             </div>
           </div>
 
