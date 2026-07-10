@@ -255,8 +255,13 @@
                 <label>Colunas <input id="quickGridCols" type="number" min="6" max="100" /></label>
                 <label>Linhas <input id="quickGridRows" type="number" min="6" max="100" /></label>
                 <label>Tam. casa <input id="quickCellSize" type="number" min="18" max="64" /></label>
+                <label>Offset X <input id="quickGridOffsetX" type="number" min="-100" max="100" /></label>
+                <label>Offset Y <input id="quickGridOffsetY" type="number" min="-100" max="100" /></label>
                 <label>Opacidade <input id="quickGridOpacity" type="range" min="0" max="100" /></label>
                 <label>Cor <input id="quickGridColor" type="color" /></label>
+                <label>Grossa a cada <input id="quickThickEvery" type="number" min="0" max="20" /></label>
+                <label class="check-row"><input id="quickSnap" type="checkbox" /> Snap</label>
+                <label class="check-row"><input id="quickCoordinates" type="checkbox" /> Coordenadas</label>
                 <button id="quickResizeGrid" type="button">Aplicar</button>
               </details>
               <details>
@@ -293,8 +298,19 @@
                   </select>
                 </label>
                 <label class="check-row"><input id="fogEnabled" type="checkbox" /> Neblina ativa</label>
+                <label>Modo
+                  <select id="fogMode">
+                    <option value="manual">Manual</option>
+                    <option value="vision">Visao</option>
+                  </select>
+                </label>
+                <label class="check-row"><input id="fogKeepExplored" type="checkbox" /> Areas exploradas</label>
                 <button id="revealAllFog" type="button">Revelar tudo</button>
                 <button id="hideAllFog" type="button">Ocultar tudo</button>
+                <button id="revealByVision" type="button">Visao tokens</button>
+                <button id="previewPlayerVision" type="button">Ver como jogador</button>
+                <button id="mapHelpButton" type="button">?</button>
+                <button id="mapChecklistButton" type="button">Checklist</button>
               </details>
               <details>
                 <summary>Token</summary>
@@ -313,6 +329,7 @@
                   <label>PV <input id="npcHp" type="number" min="1" max="999" value="20" /></label>
                 </div>
                 <label>Tipo <input id="npcType" type="text" maxlength="28" placeholder="Criatura, culto, civil..." /></label>
+                <label>Imagem <input id="npcImage" type="file" accept="image/*" /></label>
                 <label class="check-row"><input id="npcHidden" type="checkbox" /> Invisivel para jogadores</label>
                 <button id="quickAddNpc" type="button">Criar NPC</button>
               </details>
@@ -325,10 +342,13 @@
               <button id="zoomOutGrid" type="button" class="mini-tab" title="Diminuir zoom">-</button>
               <button id="resetGridZoom" type="button" class="mini-tab" title="Zoom 100%">100%</button>
               <button id="zoomInGrid" type="button" class="mini-tab" title="Aumentar zoom">+</button>
+              <button id="centerTokenView" type="button" class="mini-tab" title="Centralizar token">Alvo</button>
               <button type="button" data-tab="configuracoes" class="tab mini-tab">Grid</button>
               <button type="button" data-tab="configuracoes" class="tab mini-tab">Luz</button>
               <button id="fitGridToView" type="button" class="mini-tab">Ajustar tela</button>
+              <button id="gridAssistantButton" type="button" class="mini-tab">Guia</button>
             </div>
+            <div id="mapAssistantPanel" class="map-assistant-panel hidden"></div>
           </div>
 
           <aside class="right-stack">

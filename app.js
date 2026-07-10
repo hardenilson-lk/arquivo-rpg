@@ -18,6 +18,11 @@ const state = {
 };
 
 let viewCellSize = null;
+let pendingNpcPortrait = "";
+let pendingMapEdgeStart = null;
+let isSpacePressed = false;
+let panState = null;
+let mapPlayerPreview = false;
 
 const els = {
   battlefield: document.querySelector("#battlefield"),
@@ -32,12 +37,19 @@ const els = {
   quickGridCols: document.querySelector("#quickGridCols"),
   quickGridRows: document.querySelector("#quickGridRows"),
   quickCellSize: document.querySelector("#quickCellSize"),
+  quickGridOffsetX: document.querySelector("#quickGridOffsetX"),
+  quickGridOffsetY: document.querySelector("#quickGridOffsetY"),
   quickGridOpacity: document.querySelector("#quickGridOpacity"),
   quickGridColor: document.querySelector("#quickGridColor"),
+  quickThickEvery: document.querySelector("#quickThickEvery"),
+  quickSnap: document.querySelector("#quickSnap"),
+  quickCoordinates: document.querySelector("#quickCoordinates"),
   quickLightsOn: document.querySelector("#quickLightsOn"),
   quickDarkness: document.querySelector("#quickDarkness"),
   mapTool: document.querySelector("#mapTool"),
   fogEnabled: document.querySelector("#fogEnabled"),
+  fogMode: document.querySelector("#fogMode"),
+  fogKeepExplored: document.querySelector("#fogKeepExplored"),
   mapImageInput: document.querySelector("#mapImageInput"),
   mapImageScaleX: document.querySelector("#mapImageScaleX"),
   mapImageScaleY: document.querySelector("#mapImageScaleY"),
@@ -52,6 +64,7 @@ const els = {
   npcColor: document.querySelector("#npcColor"),
   npcHp: document.querySelector("#npcHp"),
   npcType: document.querySelector("#npcType"),
+  npcImage: document.querySelector("#npcImage"),
   npcHidden: document.querySelector("#npcHidden"),
   lightsOn: document.querySelector("#lightsOn"),
   darkness: document.querySelector("#darkness"),
@@ -435,25 +448,38 @@ function defaultMapBackground() {
 function defaultFog() {
   return {
     enabled: false,
-    revealed: []
+    mode: "manual",
+    keepExplored: true,
+    revealed: [],
+    visible: []
   };
 }
 
 function normalizeMap(map = {}) {
   const fog = { ...defaultFog(), ...(map.fog || {}) };
+  const cols = clamp(Number(map.cols), 6, 100);
+  const rows = clamp(Number(map.rows), 6, 100);
   return {
     name: map.name || "Mapa inicial",
-    cols: clamp(Number(map.cols), 6, 100),
-    rows: clamp(Number(map.rows), 6, 100),
+    cols,
+    rows,
     darkness: clamp(Number(map.darkness ?? 50), 0, 90),
     lightsOn: map.lightsOn !== false,
     cellSize: clamp(Number(map.cellSize ?? 48), 18, 64),
+    gridOffsetX: clamp(Number(map.gridOffsetX ?? 0), -100, 100),
+    gridOffsetY: clamp(Number(map.gridOffsetY ?? 0), -100, 100),
     gridOpacity: clamp(Number(map.gridOpacity ?? 38), 0, 100),
     gridColor: map.gridColor || "#debc79",
+    snap: map.snap !== false,
+    coordinates: map.coordinates === true,
+    thickEvery: clamp(Number(map.thickEvery ?? 5), 0, 20),
     background: { ...defaultMapBackground(), ...(map.background || {}) },
     fog: {
       enabled: fog.enabled === true,
-      revealed: Array.isArray(fog.revealed) ? Array.from(new Set(fog.revealed)) : []
+      mode: fog.mode === "vision" ? "vision" : "manual",
+      keepExplored: fog.keepExplored !== false,
+      revealed: Array.isArray(fog.revealed) ? Array.from(new Set(fog.revealed)) : [],
+      visible: Array.isArray(fog.visible) ? Array.from(new Set(fog.visible)) : []
     },
     marks: Array.isArray(map.marks) ? map.marks.filter((mark) => Number.isFinite(Number(mark.x)) && Number.isFinite(Number(mark.y))).map((mark) => ({
       x: clamp(Number(mark.x), 0, Number(map.cols || 16) - 1),
@@ -461,8 +487,26 @@ function normalizeMap(map = {}) {
       type: mark.type === "door" ? "door" : "wall",
       open: mark.open === true
     })) : [],
+    edges: normalizeMapEdges(map.edges, cols, rows),
     tool: ["move", "reveal", "hide", "wall", "door", "erase"].includes(map.tool) ? map.tool : "move"
   };
+}
+
+function normalizeMapEdges(edges, cols, rows) {
+  if (!Array.isArray(edges)) return [];
+  return edges
+    .filter((edge) => Number.isFinite(Number(edge.x1)) && Number.isFinite(Number(edge.y1)) && Number.isFinite(Number(edge.x2)) && Number.isFinite(Number(edge.y2)))
+    .map((edge) => ({
+      id: edge.id || crypto.randomUUID(),
+      x1: clamp(Number(edge.x1), 0, cols),
+      y1: clamp(Number(edge.y1), 0, rows),
+      x2: clamp(Number(edge.x2), 0, cols),
+      y2: clamp(Number(edge.y2), 0, rows),
+      type: edge.type === "door" ? "door" : "wall",
+      state: ["open", "closed", "locked", "secret"].includes(edge.state) ? edge.state : edge.open === true ? "open" : "closed",
+      secret: edge.secret === true
+    }))
+    .filter((edge) => edge.x1 !== edge.x2 || edge.y1 !== edge.y2);
 }
 
 function blankMap(name = "Mapa inicial") {
@@ -1092,6 +1136,7 @@ function tokenFromSheet(sheet, index = 0) {
     portrait: sheet.portrait || "",
     light: inventoryVisionBonus(sheet),
     hidden: false,
+    facing: "s",
     x: 2 + (index % 5) * 2,
     y: 2 + Math.floor(index / 5) * 2,
     hp: Number(sheet.hp) || 0,
@@ -1104,11 +1149,11 @@ function tokenFromSheet(sheet, index = 0) {
 }
 
 function inventoryVisionBonus(sheet) {
-  const text = normalizeKey(`${sheet.inventory || ""} ${sheet.notes || ""}`);
-  if (text.includes("lanterna tatica")) return 6;
-  if (text.includes("lanterna")) return 5;
+  const bonus = inventoryMechanicalBonuses(sheet);
+  if (bonus.light) return bonus.light;
+  const text = normalizeKey(`${sheet.notes || ""}`);
   if (text.includes("sinalizador")) return 4;
-  return 3;
+  return 3 + bonus.vision;
 }
 
 function seedSessionTokensFromSheets(campaign, session) {
@@ -1270,12 +1315,21 @@ function renderControls() {
   if (els.quickGridCols) els.quickGridCols.value = state.map.cols;
   if (els.quickGridRows) els.quickGridRows.value = state.map.rows;
   if (els.quickCellSize) els.quickCellSize.value = state.map.cellSize;
+  if (els.quickGridOffsetX) els.quickGridOffsetX.value = state.map.gridOffsetX;
+  if (els.quickGridOffsetY) els.quickGridOffsetY.value = state.map.gridOffsetY;
   if (els.quickGridOpacity) els.quickGridOpacity.value = state.map.gridOpacity;
   if (els.quickGridColor) els.quickGridColor.value = state.map.gridColor;
+  if (els.quickThickEvery) els.quickThickEvery.value = state.map.thickEvery;
+  if (els.quickSnap) els.quickSnap.checked = state.map.snap !== false;
+  if (els.quickCoordinates) els.quickCoordinates.checked = state.map.coordinates === true;
   if (els.quickLightsOn) els.quickLightsOn.checked = state.map.lightsOn;
   if (els.quickDarkness) els.quickDarkness.value = state.map.darkness;
   if (els.mapTool) els.mapTool.value = state.map.tool || "move";
   if (els.fogEnabled) els.fogEnabled.checked = state.map.fog?.enabled === true;
+  if (els.fogMode) els.fogMode.value = state.map.fog?.mode || "manual";
+  if (els.fogKeepExplored) els.fogKeepExplored.checked = state.map.fog?.keepExplored !== false;
+  const previewButton = document.querySelector("#previewPlayerVision");
+  if (previewButton) previewButton.textContent = mapPlayerPreview ? "Ver como mestre" : "Ver como jogador";
   const bg = state.map.background || defaultMapBackground();
   if (els.mapImageScaleX) els.mapImageScaleX.value = bg.scaleX;
   if (els.mapImageScaleY) els.mapImageScaleY.value = bg.scaleY;
@@ -1296,6 +1350,10 @@ function renderGrid() {
   els.battlefield.style.setProperty("--grid-opacity", state.map.gridOpacity / 100);
   els.battlefield.style.setProperty("--grid-color", state.map.gridColor);
   els.battlefield.style.setProperty("--grid-line-color", hexToRgba(state.map.gridColor, state.map.gridOpacity / 100));
+  els.battlefield.style.setProperty("--grid-offset-x", `${state.map.gridOffsetX}px`);
+  els.battlefield.style.setProperty("--grid-offset-y", `${state.map.gridOffsetY}px`);
+  els.battlefield.dataset.coordinates = state.map.coordinates ? "true" : "false";
+  els.battlefield.dataset.thickEvery = state.map.thickEvery || 0;
   els.battlefield.innerHTML = "";
   renderMapBackground();
 
@@ -1306,35 +1364,52 @@ function renderGrid() {
       cell.className = cellClass(x, y);
       cell.dataset.x = x;
       cell.dataset.y = y;
+      if (state.map.coordinates) {
+        cell.dataset.coord = `${x + 1},${y + 1}`;
+        cell.innerHTML = `<span class="cell-coordinate">${x + 1},${y + 1}</span>`;
+      }
+      if (state.map.thickEvery && (x % state.map.thickEvery === 0 || y % state.map.thickEvery === 0)) cell.dataset.thick = "true";
       const mark = mapMarkAt(x, y);
       if (mark) {
         cell.dataset.mark = mark.type;
         if (mark.open) cell.dataset.open = "true";
       }
       cell.addEventListener("click", () => handleMapCellClick(x, y));
+      cell.addEventListener("dblclick", (event) => {
+        event.preventDefault();
+        handleMapCellDoubleClick(x, y);
+      });
       els.battlefield.append(cell);
     }
   }
 
-  state.tokens.filter((token) => state.currentMode === "master" || !token.hidden).forEach((token) => {
+  renderMapEdges();
+
+  state.tokens.filter((token) => !isPlayerMapView() || !token.hidden).forEach((token) => {
     const piece = document.createElement("div");
     const controllable = canControlToken(token);
-    piece.className = `token${state.selectedToken === token.id ? " selected" : ""}${token.hidden ? " token-hidden" : ""}${token.type === "npc" ? " npc-token" : ""}${controllable ? "" : " token-locked"}`;
+    piece.className = `token facing-${token.facing || "s"}${state.selectedToken === token.id ? " selected" : ""}${token.hidden ? " token-hidden" : ""}${token.type === "npc" ? " npc-token" : ""}${controllable ? "" : " token-locked"}`;
+    piece.dataset.tokenId = token.id;
     piece.style.left = `calc(${token.x} * var(--cell-size))`;
     piece.style.top = `calc(${token.y} * var(--cell-size))`;
     if (token.portrait) {
       piece.classList.add("token-portrait");
       piece.style.backgroundImage = `url("${token.portrait}")`;
-      piece.innerHTML = tokenBars(token);
+      piece.innerHTML = `${tokenFacing(token)}${tokenBars(token)}`;
     } else {
       piece.style.background = token.color;
       piece.style.color = token.color;
-      piece.innerHTML = `<span class="token-initials">${escapeHtml(initials(token.name))}</span>${tokenBars(token)}`;
+      piece.innerHTML = `<span class="token-initials">${escapeHtml(initials(token.name))}</span>${tokenFacing(token)}${tokenBars(token)}`;
     }
-    piece.title = `${token.name} | luz ${token.light}${token.hidden ? " | invisivel" : ""}${controllable ? " | duplo clique: dano/cura" : ""}`;
+    piece.title = `${token.name} | luz ${token.light}${token.hidden ? " | invisivel" : ""}${controllable ? " | duplo clique: dano/cura | clique direito: virar" : ""}`;
     piece.draggable = controllable;
     piece.addEventListener("click", (event) => {
       event.stopPropagation();
+      const attacker = state.tokens.find((item) => item.id === state.selectedToken);
+      if (attacker && attacker.id !== token.id && canControlToken(attacker)) {
+        animateTokenAttack(attacker.id, token.id);
+        return;
+      }
       if (!controllable) return;
       state.selectedToken = token.id;
       renderAll();
@@ -1343,6 +1418,12 @@ function renderGrid() {
       event.stopPropagation();
       if (!controllable) return;
       promptTokenDamage(token.id);
+    });
+    piece.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!controllable) return;
+      rotateTokenFacing(token.id);
     });
     piece.addEventListener("dragstart", (event) => {
       if (!controllable) {
@@ -1366,6 +1447,10 @@ function tokenBars(token) {
   `;
 }
 
+function tokenFacing(token) {
+  return `<span class="token-facing" aria-hidden="true"></span>`;
+}
+
 function miniTokenBar(current, max, type) {
   const safeMax = Math.max(Number(max) || 1, 1);
   const safeCurrent = Math.max(0, Math.min(safeMax, Number(current) || 0));
@@ -1383,6 +1468,29 @@ function promptTokenDamage(tokenId) {
   applyTokenDamage(tokenId, Math.abs(value), value < 0 ? "heal" : "damage");
 }
 
+function animateTokenAttack(attackerId, targetId) {
+  const attacker = state.tokens.find((item) => item.id === attackerId);
+  const target = state.tokens.find((item) => item.id === targetId);
+  if (!attacker || !target || !els.battlefield) return;
+  const cellSize = viewCellSize || state.map.cellSize || 48;
+  const ax = (attacker.x + 0.5) * cellSize;
+  const ay = (attacker.y + 0.5) * cellSize;
+  const bx = (target.x + 0.5) * cellSize;
+  const by = (target.y + 0.5) * cellSize;
+  const length = Math.max(24, Math.hypot(bx - ax, by - ay));
+  const angle = Math.atan2(by - ay, bx - ax) * 180 / Math.PI;
+  const trail = document.createElement("div");
+  trail.className = "attack-trail";
+  trail.style.left = `${ax}px`;
+  trail.style.top = `${ay}px`;
+  trail.style.width = `${length}px`;
+  trail.style.transform = `rotate(${angle}deg)`;
+  trail.innerHTML = `<span>ATAQUE</span>`;
+  els.battlefield.append(trail);
+  playDiceSound();
+  window.setTimeout(() => trail.remove(), 780);
+}
+
 function renderMapBackground() {
   const bg = state.map.background || defaultMapBackground();
   if (!bg.src) return;
@@ -1398,19 +1506,71 @@ function renderMapBackground() {
   els.battlefield.append(layer);
 }
 
+function renderMapEdges() {
+  state.map = normalizeMap(state.map);
+  const edges = state.map.edges || [];
+  if (!edges.length && !pendingMapEdgeStart) return;
+  if (isPlayerMapView()) return;
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.classList.add("map-edge-layer");
+  svg.setAttribute("viewBox", `0 0 ${state.map.cols} ${state.map.rows}`);
+  svg.setAttribute("preserveAspectRatio", "none");
+  edges.forEach((edge) => {
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    line.setAttribute("x1", edge.x1);
+    line.setAttribute("y1", edge.y1);
+    line.setAttribute("x2", edge.x2);
+    line.setAttribute("y2", edge.y2);
+    line.classList.add("map-edge", edge.type === "door" ? "map-door-edge" : "map-wall-edge", `edge-${edge.state}`);
+    line.dataset.edgeId = edge.id;
+    if (edge.type === "door") {
+      line.addEventListener("dblclick", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleDoorEdge(edge.id);
+      });
+    }
+    svg.append(line);
+    if (edge.type === "door") {
+      const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      text.setAttribute("x", (edge.x1 + edge.x2) / 2);
+      text.setAttribute("y", (edge.y1 + edge.y2) / 2);
+      text.classList.add("map-door-label");
+      text.textContent = { open: "aberta", closed: "fechada", locked: "trancada", secret: "secreta" }[edge.state] || "porta";
+      svg.append(text);
+    }
+  });
+  if (pendingMapEdgeStart) {
+    const pulse = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    pulse.setAttribute("cx", pendingMapEdgeStart.x);
+    pulse.setAttribute("cy", pendingMapEdgeStart.y);
+    pulse.setAttribute("r", ".16");
+    pulse.classList.add("map-edge-start");
+    svg.append(pulse);
+  }
+  els.battlefield.append(svg);
+}
+
 function cellClass(x, y) {
   const classes = ["cell"];
   const mark = mapMarkAt(x, y);
   if (mark) classes.push(mark.type === "door" ? (mark.open ? "door-open" : "door-closed") : "wall-cell");
   if (state.map.fog?.enabled) {
+    const visible = isFogVisible(x, y);
     const revealed = isFogRevealed(x, y);
-    if (!revealed && state.currentMode !== "master") classes.push("fog-hidden");
-    if (!revealed && state.currentMode === "master") classes.push("fog-master");
-    if (revealed) classes.push("fog-revealed");
+    if (isPlayerMapView()) {
+      if (visible) classes.push("fog-visible");
+      else if (revealed && state.map.fog.keepExplored) classes.push("fog-explored");
+      else classes.push("fog-hidden");
+    } else {
+      if (!revealed) classes.push("fog-master");
+      if (revealed) classes.push("fog-revealed");
+      if (visible) classes.push("fog-visible");
+    }
   }
   if (!state.map.lightsOn) return classes.join(" ");
   const lit = state.tokens
-    .filter((token) => state.currentMode === "master" || !token.hidden)
+    .filter((token) => !isPlayerMapView() || !token.hidden)
     .some((token) => distance(token.x, token.y, x, y) <= Number(token.light) && !isSightBlocked(token.x, token.y, x, y));
   classes.push(lit ? "lit" : "dark");
   return classes.join(" ");
@@ -1424,6 +1584,14 @@ function isFogRevealed(x, y) {
   return state.map.fog?.revealed?.includes(cellKey(x, y));
 }
 
+function isFogVisible(x, y) {
+  return state.map.fog?.visible?.includes(cellKey(x, y));
+}
+
+function isPlayerMapView() {
+  return state.currentMode !== "master" || mapPlayerPreview;
+}
+
 function mapMarkAt(x, y) {
   return state.map.marks?.find((mark) => mark.x === x && mark.y === y) || null;
 }
@@ -1434,8 +1602,35 @@ function blocksSight(x, y) {
 }
 
 function isSightBlocked(ax, ay, bx, by) {
+  const line = { x1: ax + 0.5, y1: ay + 0.5, x2: bx + 0.5, y2: by + 0.5 };
+  if ((state.map.edges || []).some((edge) => edgeBlocksSight(edge) && segmentsIntersect(line, edge))) return true;
   const cells = lineCells(ax, ay, bx, by).slice(1, -1);
   return cells.some(([x, y]) => blocksSight(x, y));
+}
+
+function edgeBlocksSight(edge) {
+  if (!edge) return false;
+  if (edge.type === "wall") return true;
+  return edge.type === "door" && edge.state !== "open";
+}
+
+function segmentsIntersect(a, b) {
+  const p1 = { x: a.x1, y: a.y1 };
+  const q1 = { x: a.x2, y: a.y2 };
+  const p2 = { x: b.x1, y: b.y1 };
+  const q2 = { x: b.x2, y: b.y2 };
+  const o1 = orientation(p1, q1, p2);
+  const o2 = orientation(p1, q1, q2);
+  const o3 = orientation(p2, q2, p1);
+  const o4 = orientation(p2, q2, q1);
+  if (o1 !== o2 && o3 !== o4) return true;
+  return false;
+}
+
+function orientation(p, q, r) {
+  const value = (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y);
+  if (Math.abs(value) < 0.0001) return 0;
+  return value > 0 ? 1 : 2;
 }
 
 function lineCells(x0, y0, x1, y1) {
@@ -1472,15 +1667,99 @@ function removeMapMark(x, y) {
   state.map.marks = (state.map.marks || []).filter((mark) => mark.x !== x || mark.y !== y);
 }
 
+function mapPointFromCell(x, y) {
+  return state.map.snap === false
+    ? { x: x + 0.5, y: y + 0.5 }
+    : { x: clamp(x + 0.5, 0, state.map.cols), y: clamp(y + 0.5, 0, state.map.rows) };
+}
+
+function sameEdge(a, b) {
+  if (!a || !b) return false;
+  const direct = Math.abs(a.x1 - b.x1) < 0.001 && Math.abs(a.y1 - b.y1) < 0.001 && Math.abs(a.x2 - b.x2) < 0.001 && Math.abs(a.y2 - b.y2) < 0.001;
+  const reverse = Math.abs(a.x1 - b.x2) < 0.001 && Math.abs(a.y1 - b.y2) < 0.001 && Math.abs(a.x2 - b.x1) < 0.001 && Math.abs(a.y2 - b.y1) < 0.001;
+  return direct || reverse;
+}
+
+function upsertMapEdge(start, end, type) {
+  state.map.edges = state.map.edges || [];
+  const draft = { x1: start.x, y1: start.y, x2: end.x, y2: end.y, type };
+  const existing = state.map.edges.find((edge) => sameEdge(edge, draft));
+  if (existing) {
+    existing.type = type;
+    if (type === "door") existing.state = nextDoorState(existing.state);
+    else existing.state = "closed";
+    return;
+  }
+  state.map.edges.push({ id: crypto.randomUUID(), ...draft, state: type === "door" ? "closed" : "closed" });
+}
+
+function nextDoorState(stateName) {
+  return { closed: "open", open: "locked", locked: "secret", secret: "closed" }[stateName] || "closed";
+}
+
+function toggleDoorEdge(edgeId) {
+  if (!isMasterMode()) return;
+  const edge = (state.map.edges || []).find((item) => item.id === edgeId);
+  if (!edge || edge.type !== "door") return;
+  edge.state = edge.state === "open" ? "closed" : "open";
+  renderAll();
+}
+
+function toggleNearestDoor(x, y) {
+  if (!isMasterMode()) return false;
+  const point = mapPointFromCell(x, y);
+  let best = null;
+  (state.map.edges || []).forEach((edge) => {
+    if (edge.type !== "door") return;
+    const distanceToEdge = distancePointToSegment(point, edge);
+    if (!best || distanceToEdge < best.distance) best = { edge, distance: distanceToEdge };
+  });
+  if (!best || best.distance > 0.85) return false;
+  best.edge.state = best.edge.state === "open" ? "closed" : "open";
+  renderAll();
+  return true;
+}
+
+function removeNearestMapEdge(x, y) {
+  const point = mapPointFromCell(x, y);
+  const edges = state.map.edges || [];
+  if (!edges.length) return false;
+  let best = null;
+  edges.forEach((edge) => {
+    const distanceToEdge = distancePointToSegment(point, edge);
+    if (!best || distanceToEdge < best.distance) best = { edge, distance: distanceToEdge };
+  });
+  if (best && best.distance < 0.75) {
+    state.map.edges = edges.filter((edge) => edge.id !== best.edge.id);
+    return true;
+  }
+  return false;
+}
+
+function distancePointToSegment(point, edge) {
+  const dx = edge.x2 - edge.x1;
+  const dy = edge.y2 - edge.y1;
+  if (dx === 0 && dy === 0) return Math.hypot(point.x - edge.x1, point.y - edge.y1);
+  const t = Math.max(0, Math.min(1, ((point.x - edge.x1) * dx + (point.y - edge.y1) * dy) / (dx * dx + dy * dy)));
+  const x = edge.x1 + t * dx;
+  const y = edge.y1 + t * dy;
+  return Math.hypot(point.x - x, point.y - y);
+}
+
 function revealFogAt(x, y, radius = 1) {
   state.map.fog = { ...defaultFog(), ...(state.map.fog || {}) };
   const revealed = new Set(state.map.fog.revealed || []);
+  const visible = new Set(state.map.fog.visible || []);
   for (let yy = y - radius; yy <= y + radius; yy += 1) {
     for (let xx = x - radius; xx <= x + radius; xx += 1) {
-      if (xx >= 0 && yy >= 0 && xx < state.map.cols && yy < state.map.rows) revealed.add(cellKey(xx, yy));
+      if (xx >= 0 && yy >= 0 && xx < state.map.cols && yy < state.map.rows) {
+        revealed.add(cellKey(xx, yy));
+        visible.add(cellKey(xx, yy));
+      }
     }
   }
   state.map.fog.revealed = Array.from(revealed);
+  state.map.fog.visible = Array.from(visible);
 }
 
 function hideFogAt(x, y, radius = 1) {
@@ -1490,6 +1769,52 @@ function hideFogAt(x, y, radius = 1) {
     for (let xx = x - radius; xx <= x + radius; xx += 1) hide.add(cellKey(xx, yy));
   }
   state.map.fog.revealed = (state.map.fog.revealed || []).filter((key) => !hide.has(key));
+  state.map.fog.visible = (state.map.fog.visible || []).filter((key) => !hide.has(key));
+}
+
+function updateFogVisibilityFromTokens() {
+  state.map = normalizeMap(state.map);
+  state.map.fog = { ...defaultFog(), ...(state.map.fog || {}), enabled: true, mode: "vision" };
+  const revealed = new Set(state.map.fog.revealed || []);
+  const visible = new Set();
+  state.tokens
+    .filter((token) => !token.hidden)
+    .forEach((token) => {
+      const range = Math.max(0, Number(token.light) || 0);
+      for (let y = Math.max(0, token.y - range); y <= Math.min(state.map.rows - 1, token.y + range); y += 1) {
+        for (let x = Math.max(0, token.x - range); x <= Math.min(state.map.cols - 1, token.x + range); x += 1) {
+          const cellRange = tokenVisionRangeForCell(token, x, y);
+          if (distance(token.x, token.y, x, y) <= cellRange && !isSightBlocked(token.x, token.y, x, y)) {
+            revealed.add(cellKey(x, y));
+            visible.add(cellKey(x, y));
+          }
+        }
+      }
+    });
+  state.map.fog.revealed = Array.from(revealed);
+  state.map.fog.visible = Array.from(visible);
+}
+
+function revealFogByTokenVision() {
+  updateFogVisibilityFromTokens();
+  renderAll();
+}
+
+function tokenVisionRangeForCell(token, x, y) {
+  const range = Math.max(0, Number(token.light) || 0);
+  if (x === token.x && y === token.y) return range;
+  const vectors = {
+    n: { x: 0, y: -1 },
+    e: { x: 1, y: 0 },
+    s: { x: 0, y: 1 },
+    w: { x: -1, y: 0 }
+  };
+  const facing = vectors[token.facing || "s"] || vectors.s;
+  const dx = x - token.x;
+  const dy = y - token.y;
+  const dot = dx * facing.x + dy * facing.y;
+  if (dot < 0) return Math.min(range, 1);
+  return range;
 }
 
 function handleMapCellClick(x, y) {
@@ -1501,17 +1826,30 @@ function handleMapCellClick(x, y) {
   }
   if (tool === "reveal") revealFogAt(x, y, 1);
   if (tool === "hide") hideFogAt(x, y, 1);
-  if (tool === "wall") upsertMapMark(x, y, "wall");
+  if (tool === "wall" || tool === "door") {
+    const point = mapPointFromCell(x, y);
+    if (!pendingMapEdgeStart) {
+      pendingMapEdgeStart = point;
+      renderGrid();
+      return;
+    }
+    upsertMapEdge(pendingMapEdgeStart, point, tool);
+    pendingMapEdgeStart = null;
+  }
   if (tool === "door") {
-    const existing = mapMarkAt(x, y);
-    if (existing?.type === "door") existing.open = !existing.open;
-    else upsertMapMark(x, y, "door");
+    // handled by edge workflow above
   }
   if (tool === "erase") {
+    removeNearestMapEdge(x, y);
     removeMapMark(x, y);
     hideFogAt(x, y, 0);
   }
   renderAll();
+}
+
+function handleMapCellDoubleClick(x, y) {
+  if (!isMasterMode()) return;
+  if (toggleNearestDoor(x, y)) return;
 }
 
 function distance(ax, ay, bx, by) {
@@ -1530,8 +1868,39 @@ function initials(name) {
 function moveSelectedToken(x, y) {
   const token = state.tokens.find((item) => item.id === state.selectedToken);
   if (!canControlToken(token)) return;
+  if (isMovementBlocked(token, x, y)) {
+    flashBlockedMove(x, y);
+    return;
+  }
   token.x = x;
   token.y = y;
+  if (state.map.fog?.enabled && state.map.fog.mode === "vision") updateFogVisibilityFromTokens();
+  renderAll();
+}
+
+function isMovementBlocked(token, x, y) {
+  if (!token) return true;
+  if (x < 0 || y < 0 || x >= state.map.cols || y >= state.map.rows) return true;
+  if (blocksSight(x, y)) return true;
+  return isSightBlocked(token.x, token.y, x, y);
+}
+
+function flashBlockedMove(x, y) {
+  const cell = els.battlefield?.querySelector(`[data-x="${x}"][data-y="${y}"]`);
+  if (!cell) return;
+  cell.classList.remove("move-blocked");
+  void cell.offsetWidth;
+  cell.classList.add("move-blocked");
+  window.setTimeout(() => cell.classList.remove("move-blocked"), 520);
+}
+
+function rotateTokenFacing(tokenId) {
+  const token = state.tokens.find((item) => item.id === tokenId);
+  if (!canControlToken(token)) return;
+  const order = ["n", "e", "s", "w"];
+  const current = order.indexOf(token.facing || "s");
+  token.facing = order[(current + 1 + order.length) % order.length];
+  if (state.map.fog?.enabled && state.map.fog.mode === "vision") updateFogVisibilityFromTokens();
   renderAll();
 }
 
@@ -1544,7 +1913,7 @@ function renderTokenList() {
     row.innerHTML = `
       <div>
         <strong>${escapeHtml(token.name)}</strong>
-        <small>${escapeHtml(token.label || (token.type === "npc" ? "NPC/Criatura" : "Personagem"))} | ${token.x + 1},${token.y + 1}${token.hidden ? " | invisivel" : ""}</small>
+        <small>${escapeHtml(token.label || (token.type === "npc" ? "NPC/Criatura" : "Personagem"))} | ${token.x + 1},${token.y + 1} | Frente ${facingLabel(token.facing)}${token.hidden ? " | invisivel" : ""}</small>
       </div>
       <span>PV ${escapeHtml(token.hp ?? "?")} / ${escapeHtml(token.hpMax ?? "?")}<br>Luz ${escapeHtml(token.light)}</span>
       ${canEdit ? `<div class="damage-inline"><input data-token-damage="${escapeAttr(token.id)}" type="number" min="0" placeholder="Dano" /><button type="button" data-token-damage-apply="${escapeAttr(token.id)}">Dano</button><button type="button" data-token-heal-apply="${escapeAttr(token.id)}">Cura</button></div>` : ""}
@@ -1565,7 +1934,12 @@ function renderTokenList() {
       state.tokens = state.tokens.filter((item) => item.id !== token.id);
       renderAll();
     });
-    row.append(toggle, remove);
+    const rotate = document.createElement("button");
+    rotate.type = "button";
+    rotate.textContent = "Virar";
+    rotate.disabled = !canEdit;
+    rotate.addEventListener("click", () => rotateTokenFacing(token.id));
+    row.append(rotate, toggle, remove);
     els.tokenList.append(row);
   });
   els.tokenList.querySelectorAll("[data-token-damage-apply]").forEach((button) => {
@@ -1580,6 +1954,10 @@ function renderTokenList() {
       applyTokenDamage(button.dataset.tokenHealApply, Number(input?.value || 0), "heal");
     });
   });
+}
+
+function facingLabel(facing = "s") {
+  return { n: "Norte", e: "Leste", s: "Sul", w: "Oeste" }[facing] || "Sul";
 }
 
 function renderMasterShield() {
@@ -1645,6 +2023,7 @@ function addToken(source = "sidebar") {
     color: colorInput?.value || "#c83b2f",
     light: clamp(Number(lightInput?.value ?? 3), 0, 10),
     hidden: false,
+    facing: "s",
     x: Math.floor(state.map.cols / 2),
     y: Math.floor(state.map.rows / 2)
   });
@@ -1661,14 +2040,18 @@ function addNpcToken() {
     type: "npc",
     label: els.npcType?.value.trim() || "NPC/Criatura",
     color: els.npcColor?.value || "#7b241c",
+    portrait: pendingNpcPortrait,
     light: 0,
     hidden: els.npcHidden?.checked === true,
+    facing: "s",
     hp,
     hpMax: hp,
     x: Math.floor(state.map.cols / 2),
     y: Math.floor(state.map.rows / 2)
   });
   if (els.npcName) els.npcName.value = "";
+  if (els.npcImage) els.npcImage.value = "";
+  pendingNpcPortrait = "";
   renderAll();
 }
 
@@ -1805,6 +2188,11 @@ function renderCrisisSheet() {
 
   els.crisisSheet.querySelectorAll("[data-roll-text]").forEach((button) => {
     button.addEventListener("click", () => rollFromText(button.dataset.rollText));
+  });
+
+  els.crisisSheet.querySelectorAll("[data-attack-field]").forEach((field) => {
+    field.addEventListener("input", () => updateAttackField(Number(field.dataset.attackIndex), field.dataset.attackField, field.value, false));
+    field.addEventListener("change", () => updateAttackField(Number(field.dataset.attackIndex), field.dataset.attackField, field.value));
   });
 
   els.crisisSheet.querySelectorAll("[data-add-line]").forEach((button) => {
@@ -1972,6 +2360,14 @@ function catalogForField(field) {
     if (!className) return [];
     return catalog.paths.filter((entry) => normalizeKey(entry.className) === className);
   }
+  if (field === "attacks") {
+    return catalog.inventory
+      .filter((entry) => {
+        const stats = catalogStats[entry.name] || {};
+        return stats.damage && stats.damage !== "-";
+      })
+      .map((entry) => ({ ...entry, type: `Ataque - ${catalogStats[entry.name]?.category || entry.type}` }));
+  }
   return {
     nex: catalog.nex,
     role: catalog.origins,
@@ -1987,6 +2383,7 @@ function catalogTitle(field) {
     className: "Catalogo de classes",
     pathName: "Catalogo de trilhas",
     abilities: "Talentos / Habilidades",
+    attacks: "Ataques",
     inventory: "Equipamentos",
     rituals: "Rituais"
   }[field] || "Catalogo";
@@ -2000,6 +2397,20 @@ function addCatalogEntry(field, entry) {
     if (field === "className" && normalizeKey(selectedPath?.className) !== normalizeKey(entry.name)) {
       sheet.pathName = "";
     }
+    renderAll();
+    return;
+  }
+  if (field === "attacks") {
+    const stats = catalogStats[entry.name] || {};
+    const line = serializeAttackLine({
+      name: entry.name,
+      test: stats.category?.includes("corpo") ? "FOR ou AGI" : "Pontaria",
+      damage: stats.damage || "1d20",
+      critical: "20",
+      range: stats.range || "Curto",
+      special: entry.desc || stats.bonus || "-"
+    });
+    sheet.attacks = splitLines(sheet.attacks).concat(line).join("\n");
     renderAll();
     return;
   }
@@ -2084,6 +2495,10 @@ function catalogThumb(entry) {
   return `<span class="catalog-thumb" style="background-image:url('${svg}')"></span>`;
 }
 
+function catalogPhotoUrl(kind, name, type = "") {
+  return "";
+}
+
 function catalogSvg(kind, name) {
   const short = name.slice(0, 2).toUpperCase();
   const color = kind.startsWith("ritual") ? "#6d257d" : kind.includes("faca") || kind.includes("katana") ? "#343230" : kind.includes("colete") || kind.includes("armadura") ? "#5d503c" : kind.includes("granada") || kind.includes("molotov") ? "#65351f" : "#27384a";
@@ -2131,8 +2546,67 @@ function renderDossierSkillGroup(title, skills) {
 }
 
 function renderAttackRows(attacks) {
-  const rows = attacks.length ? attacks : ["Novo ataque 1d20"];
-  return rows.slice(0, 6).map((item) => `<tr><td>${escapeHtml(item)}</td><td>1d20</td><td>${escapeHtml(item.match(/\d*d\d+/i)?.[0] || "-")}</td><td>20</td><td>Curto</td><td>-</td><td><button type="button" data-roll-text="${escapeAttr(item)}">Rolar</button></td></tr>`).join("");
+  const rows = attacks.length ? attacks : ["Novo ataque | 1d20 | 1d4 | 20 | Curto | -"];
+  return rows.slice(0, 8).map((item, index) => {
+    const attack = parseAttackLine(item);
+    return `
+      <tr>
+        <td><input data-attack-index="${index}" data-attack-field="name" value="${escapeAttr(attack.name)}" /></td>
+        <td><input data-attack-index="${index}" data-attack-field="test" value="${escapeAttr(attack.test)}" /></td>
+        <td><input data-attack-index="${index}" data-attack-field="damage" value="${escapeAttr(attack.damage)}" /></td>
+        <td><input data-attack-index="${index}" data-attack-field="critical" value="${escapeAttr(attack.critical)}" /></td>
+        <td><input data-attack-index="${index}" data-attack-field="range" value="${escapeAttr(attack.range)}" /></td>
+        <td><input data-attack-index="${index}" data-attack-field="special" value="${escapeAttr(attack.special)}" /></td>
+        <td><button type="button" data-roll-text="${escapeAttr(attack.damage || attack.test || item)}">Rolar</button><button type="button" data-remove-line="attacks" data-index="${index}">Remover</button></td>
+      </tr>
+    `;
+  }).join("");
+}
+
+function parseAttackLine(line) {
+  const text = String(line || "");
+  const parts = text.split("|").map((part) => part.trim());
+  if (parts.length >= 6) {
+    return {
+      name: parts[0],
+      test: parts[1] || "1d20",
+      damage: parts[2] || "",
+      critical: parts[3] || "20",
+      range: parts[4] || "Curto",
+      special: parts.slice(5).join(" | ") || "-"
+    };
+  }
+  return {
+    name: text.replace(/\d*d\d+.*/i, "").trim() || text || "Novo ataque",
+    test: "1d20",
+    damage: text.match(/\d*d\d+(?:[+-]\d+)?/i)?.[0] || "",
+    critical: "20",
+    range: "Curto",
+    special: text.includes("-") ? text.split("-").slice(1).join("-").trim() : "-"
+  };
+}
+
+function serializeAttackLine(attack) {
+  return [
+    attack.name || "Novo ataque",
+    attack.test || "1d20",
+    attack.damage || "-",
+    attack.critical || "20",
+    attack.range || "Curto",
+    attack.special || "-"
+  ].join(" | ");
+}
+
+function updateAttackField(index, field, value, rerender = true) {
+  const sheet = ensureActiveSheet();
+  const attacks = splitLines(sheet.attacks);
+  while (attacks.length <= index) attacks.push("Novo ataque | 1d20 | 1d4 | 20 | Curto | -");
+  const attack = parseAttackLine(attacks[index]);
+  attack[field] = value;
+  attacks[index] = serializeAttackLine(attack);
+  sheet.attacks = attacks.join("\n");
+  if (rerender) renderAll();
+  else save();
 }
 
 function renderLineList(lines, emptyText, field) {
@@ -2141,10 +2615,35 @@ function renderLineList(lines, emptyText, field) {
 }
 
 function parseInventoryItem(raw) {
-  const name = String(raw || "").split("|")[0].split(" - ")[0].trim();
+  const parsed = parseInventoryLine(raw);
+  const name = parsed.name;
   const entry = catalog.inventory.find((item) => normalizeKey(item.name) === normalizeKey(name));
-  const stats = catalogStats[entry?.name || name] || {};
-  return { raw, name: entry?.name || name || "Item sem nome", entry, stats };
+  const stats = { ...(catalogStats[entry?.name || name] || {}), ...parsed.meta };
+  return { raw, name: entry?.name || name || "Item sem nome", entry, stats, customDescription: parsed.description };
+}
+
+function parseInventoryLine(raw) {
+  const [left, ...descriptionParts] = String(raw || "").split(" - ");
+  const parts = left.split("|").map((part) => part.trim()).filter(Boolean);
+  const meta = {};
+  parts.slice(1).forEach((part) => {
+    const [label, ...valueParts] = part.split(":");
+    if (!valueParts.length) return;
+    const key = normalizeKey(label).replace(/\s+/g, "");
+    const value = valueParts.join(":").trim();
+    if (key === "tipo") meta.category = value;
+    if (key === "volume") meta.volume = value;
+    if (key === "dano") meta.damage = value;
+    if (key === "alcance") meta.range = value;
+    if (key === "bonus" || key === "bônus" || key === "uso") meta.bonus = value;
+    if (key === "defesa") meta.defense = value;
+    if (key === "imagem" || key === "foto" || key === "image") meta.image = value;
+  });
+  return {
+    name: parts[0] || "Item sem nome",
+    meta,
+    description: descriptionParts.join(" - ").trim()
+  };
 }
 
 function inventoryItemDescription(item) {
@@ -2176,7 +2675,7 @@ function inventoryItemDescription(item) {
     "Granada de Fragmentacao": "Explosivo de area para situacoes extremas. Perigoso para aliados, evidencias e estruturas proximas.",
     Molotov: "Incendiario improvisado que cria fogo e pressiona uma area. E instavel, chamativo e arriscado em locais fechados."
   };
-  return details[item.name] || item.entry?.desc || "Item registrado manualmente na ficha. Complete a descricao conforme a decisao do mestre e o contexto da cena.";
+  return item.customDescription || details[item.name] || item.entry?.desc || "Item registrado manualmente na ficha. Complete a descricao conforme a decisao do mestre e o contexto da cena.";
 }
 
 function inventoryItemMeta(item) {
@@ -2193,8 +2692,9 @@ function inventoryItemMeta(item) {
 
 function inventoryItemCard(raw, index) {
   const item = parseInventoryItem(raw);
+  const active = inventoryLineActive(raw);
   return `
-    <article class="inventory-card">
+    <article class="inventory-card ${active ? "item-active" : "item-inactive"}">
       <div class="inventory-photo-wrap">
         ${catalogThumb(item.entry || { name: item.name, type: "Item" })}
         <span>Foto aproximada</span>
@@ -2202,11 +2702,20 @@ function inventoryItemCard(raw, index) {
       <div class="inventory-card-body">
         <div class="inventory-card-head">
           <h3>${escapeHtml(item.name)}</h3>
+          <button type="button" data-inventory-toggle="${index}">${active ? "Desativar" : "Ativar"}</button>
           <button type="button" data-inventory-remove="${index}">Remover</button>
         </div>
         <dl class="inventory-meta">
+          <div><dt>Estado</dt><dd>${active ? "Ativo" : "Inativo"}</dd></div>
           ${inventoryItemMeta(item).map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}
         </dl>
+        <div class="inventory-edit-grid">
+          <label>Tipo <input data-inventory-index="${index}" data-inventory-field="category" value="${escapeAttr(item.stats.category || item.entry?.type || "Manual")}" /></label>
+          <label>Volume <input data-inventory-index="${index}" data-inventory-field="volume" value="${escapeAttr(item.stats.volume ?? "-")}" /></label>
+          <label>Dano <input data-inventory-index="${index}" data-inventory-field="damage" value="${escapeAttr(item.stats.damage || "-")}" /></label>
+          <label>Alcance <input data-inventory-index="${index}" data-inventory-field="range" value="${escapeAttr(item.stats.range || "-")}" /></label>
+          <label>Bonus <input data-inventory-index="${index}" data-inventory-field="bonus" value="${escapeAttr(item.stats.bonus || item.stats.defense || "-")}" /></label>
+        </div>
         <p>${escapeHtml(inventoryItemDescription(item))}</p>
       </div>
     </article>
@@ -2232,6 +2741,13 @@ function renderInventoryView() {
   `;
   container.querySelectorAll("[data-inventory-remove]").forEach((button) => {
     button.addEventListener("click", () => removeSheetLine("inventory", Number(button.dataset.inventoryRemove)));
+  });
+  container.querySelectorAll("[data-inventory-toggle]").forEach((button) => {
+    button.addEventListener("click", () => toggleInventoryActive(Number(button.dataset.inventoryToggle)));
+  });
+  container.querySelectorAll("[data-inventory-field]").forEach((field) => {
+    field.addEventListener("input", () => updateInventoryField(Number(field.dataset.inventoryIndex), field.dataset.inventoryField, field.value, false));
+    field.addEventListener("change", () => updateInventoryField(Number(field.dataset.inventoryIndex), field.dataset.inventoryField, field.value));
   });
   container.querySelector("[data-inventory-add]")?.addEventListener("click", () => openCatalog("inventory"));
   container.querySelector("[data-tab]")?.addEventListener("click", () => switchTab("fichas"));
@@ -2283,8 +2799,47 @@ function renderMissionsView() {
       </dl>
       <h4>Pistas reveladas</h4>
       ${pistas.length ? `<ul>${pistas.map((pista) => `<li>${escapeHtml(pista)}</li>`).join("")}</ul>` : `<p>Nenhuma pista revelada ainda.</p>`}
+      ${isMasterMode() ? `<button type="button" data-generate-mission>Gerar arquivo de missao</button>` : ""}
     </article>
   `;
+  els.missionsApp.querySelector("[data-generate-mission]")?.addEventListener("click", generateMissionForMaster);
+}
+
+function generateMissionForMaster() {
+  const campaign = currentCampaign();
+  if (!campaign || !isMasterMode()) return;
+  const themes = [
+    ["Ecos no necroterio", "Investigue registros de corpos que continuaram emitindo sons apos a declaracao de obito.", "Tecnico legista desaparecido", "Camera do corredor apagou as 03:17", "Um simbolo foi riscado sob a mesa fria"],
+    ["A casa sem reflexo", "Entre em uma residencia onde espelhos mostram pessoas que nao estao mais vivas.", "Vizinho ouviu passos dentro das paredes", "Todos os espelhos foram cobertos com jornal antigo", "Uma chave foi achada dentro de um copo d'agua"],
+    ["Sinal de emergencia", "Rastreie uma transmissao de radio repetindo nomes dos investigadores antes deles chegarem.", "Antena improvisada no telhado", "Mensagem repete a cada sete minutos", "Um aparelho esquenta quando alguem mente"]
+  ];
+  const pick = themes[Math.floor(Math.random() * themes.length)];
+  const next = Math.max(0, ...campaign.sessoes.map((session) => Number(session.numero) || 0)) + 1;
+  const session = createSessionRecord(campaign.id, next, pick[0], pick[1], blankMap(pick[0]));
+  session.pistas = pick.slice(2);
+  session.privateNote = "Use luz baixa, pistas incompletas e uma consequencia clara para falhas criticas.";
+  session.publicText = pick[1];
+  session.visibleToPlayers = false;
+  session.tokens.push({
+    id: crypto.randomUUID(),
+    name: "Ameaca inicial",
+    type: "npc",
+    label: "Criatura / suspeito",
+    color: "#7b241c",
+    light: 0,
+    hidden: true,
+    hp: 20 + next * 4,
+    hpMax: 20 + next * 4,
+    x: 8,
+    y: 6
+  });
+  seedSessionTokensFromSheets(campaign, session);
+  campaign.sessoes.push(session);
+  state.activeCampaignId = campaign.id;
+  state.activeSessionId = session.id;
+  applySessionToTable(session);
+  renderAll();
+  renderPortal();
 }
 
 function renderChatView() {
@@ -2510,6 +3065,7 @@ function classBaseStats(sheet) {
 
 function inventoryMechanicalBonuses(sheet) {
   return splitLines(sheet.inventory).reduce((bonus, raw) => {
+    if (!inventoryLineActive(raw)) return bonus;
     const item = parseInventoryItem(raw);
     const defenseText = String(item.stats.defense || "");
     const defense = Number(defenseText.match(/[+-]?\d+/)?.[0] || 0);
@@ -2523,6 +3079,48 @@ function inventoryMechanicalBonuses(sheet) {
     if (key.includes("binoculos")) bonus.vision += 2;
     return bonus;
   }, { defense: 0, block: 0, light: 0, vision: 0 });
+}
+
+function inventoryLineActive(raw) {
+  return !normalizeKey(raw).includes("inativo");
+}
+
+function toggleInventoryActive(index) {
+  const sheet = ensureActiveSheet();
+  const items = splitLines(sheet.inventory);
+  const raw = items[index] || "";
+  if (!raw) return;
+  const active = inventoryLineActive(raw);
+  items[index] = active
+    ? raw.includes("|") ? `${raw} | Inativo` : `${raw} | Inativo`
+    : raw.replace(/\s*\|\s*inativo/ig, "").replace(/\s*-\s*inativo/ig, "");
+  sheet.inventory = items.join("\n");
+  recalculateDerivedStats(sheet, "inventory");
+  renderAll();
+}
+
+function updateInventoryField(index, field, value, rerender = true) {
+  const sheet = ensureActiveSheet();
+  const items = splitLines(sheet.inventory);
+  const current = parseInventoryLine(items[index] || "Item sem nome");
+  const meta = { ...current.meta, [field]: value };
+  const labels = {
+    category: "Tipo",
+    volume: "Volume",
+    damage: "Dano",
+    range: "Alcance",
+    bonus: "Bonus",
+    defense: "Defesa"
+  };
+  const metaText = Object.entries(meta)
+    .filter(([, metaValue]) => String(metaValue || "").trim())
+    .map(([metaKey, metaValue]) => `${labels[metaKey] || metaKey}: ${metaValue}`)
+    .join(" | ");
+  items[index] = `${current.name}${metaText ? ` | ${metaText}` : ""}${current.description ? ` - ${current.description}` : ""}`;
+  sheet.inventory = items.join("\n");
+  recalculateDerivedStats(sheet, "inventory");
+  if (rerender) renderAll();
+  else save();
 }
 
 function recalculateDerivedStats(sheet, changedField = "") {
@@ -2546,7 +3144,7 @@ function recalculateDerivedStats(sheet, changedField = "") {
   preserveCurrent("pe", "peMax", maxPe);
   preserveCurrent("san", "sanMax", maxSan);
   sheet.defense = defense;
-  sheet.block = Math.max(Number(sheet.block) || 0, itemBonus.block);
+  sheet.block = changedField === "inventory" ? itemBonus.block : Math.max(Number(sheet.block) || 0, itemBonus.block);
   sheet.dodge = dodge;
   syncSheetToken(sheet);
   return sheet;
@@ -2577,6 +3175,7 @@ function syncSheetToken(sheet = ensureActiveSheet()) {
     token.peMax = statValue(sheet.peMax, token.peMax);
     token.san = statValue(sheet.san, token.san);
     token.sanMax = statValue(sheet.sanMax, token.sanMax);
+    token.light = statValue(inventoryVisionBonus(sheet), token.light);
   });
   const campaign = currentCampaign();
   campaign?.sessoes?.forEach((session) => {
@@ -2590,7 +3189,8 @@ function syncSheetToken(sheet = ensureActiveSheet()) {
       pe: statValue(sheet.pe, token.pe),
       peMax: statValue(sheet.peMax, token.peMax),
       san: statValue(sheet.san, token.san),
-      sanMax: statValue(sheet.sanMax, token.sanMax)
+      sanMax: statValue(sheet.sanMax, token.sanMax),
+      light: statValue(inventoryVisionBonus(sheet), token.light)
     } : token);
   });
 }
@@ -2613,6 +3213,7 @@ function applySheetDamage(sheetId, amount, mode = "damage") {
   sheet.hp = mode === "heal" ? Math.min(max, current + value) : Math.max(0, current - finalDamage);
   syncSheetToken(sheet);
   renderAll();
+  animateTokenImpactForSheet(sheet.id, mode, mode === "damage" ? finalDamage : value);
 }
 
 function applyTokenDamage(tokenId, amount, mode = "damage") {
@@ -2629,6 +3230,27 @@ function applyTokenDamage(tokenId, amount, mode = "damage") {
   token.hp = mode === "heal" ? Math.min(max, current + value) : Math.max(0, current - value);
   syncCurrentSession();
   renderAll();
+  animateTokenImpact(token.id, mode, value);
+}
+
+function animateTokenImpactForSheet(sheetId, mode, amount) {
+  const token = state.tokens.find((item) => item.sheetId === sheetId);
+  if (token) animateTokenImpact(token.id, mode, amount);
+}
+
+function animateTokenImpact(tokenId, mode, amount) {
+  window.requestAnimationFrame(() => {
+    const node = els.battlefield?.querySelector(`[data-token-id="${selectorEscape(tokenId)}"]`);
+    if (!node) return;
+    node.classList.remove("token-impact-damage", "token-impact-heal");
+    node.dataset.impact = mode === "heal" ? `+${amount}` : `-${amount}`;
+    void node.offsetWidth;
+    node.classList.add(mode === "heal" ? "token-impact-heal" : "token-impact-damage");
+    window.setTimeout(() => {
+      node.classList.remove("token-impact-damage", "token-impact-heal");
+      delete node.dataset.impact;
+    }, 760);
+  });
 }
 
 function uploadProfilePhoto(file) {
@@ -2659,7 +3281,7 @@ function adjustSheetNumber(field, delta) {
 
 function addSheetLine(field) {
   const label = {
-    attacks: "Novo ataque 1d20",
+    attacks: "Novo ataque | 1d20 | 1d4 | 20 | Curto | -",
     abilities: "Nova habilidade",
     rituals: "Novo ritual 1d20",
     inventory: "Novo item"
@@ -2855,6 +3477,97 @@ function resetGridZoom() {
   renderGrid();
 }
 
+function centerTokenView() {
+  const wrap = document.querySelector(".battlefield-wrap");
+  if (!wrap) return;
+  const user = currentUser();
+  const token = state.tokens.find((item) => item.id === state.selectedToken && canControlToken(item))
+    || state.tokens.find((item) => item.sheetId && (user?.sheetIds || []).includes(item.sheetId))
+    || state.tokens.find((item) => isMasterMode() || !item.hidden);
+  if (!token) return;
+  const cellSize = viewCellSize || state.map.cellSize || 48;
+  wrap.scrollTo({
+    left: Math.max(0, token.x * cellSize - wrap.clientWidth / 2 + cellSize / 2),
+    top: Math.max(0, token.y * cellSize - wrap.clientHeight / 2 + cellSize / 2),
+    behavior: "smooth"
+  });
+}
+
+function startMapPan(event) {
+  const wrap = document.querySelector(".battlefield-wrap");
+  if (!wrap || !(event.button === 1 || isSpacePressed)) return;
+  event.preventDefault();
+  panState = { x: event.clientX, y: event.clientY, left: wrap.scrollLeft, top: wrap.scrollTop };
+  wrap.classList.add("panning");
+}
+
+function moveMapPan(event) {
+  const wrap = document.querySelector(".battlefield-wrap");
+  if (!wrap || !panState) return;
+  wrap.scrollLeft = panState.left - (event.clientX - panState.x);
+  wrap.scrollTop = panState.top - (event.clientY - panState.y);
+}
+
+function stopMapPan() {
+  const wrap = document.querySelector(".battlefield-wrap");
+  if (wrap) wrap.classList.remove("panning");
+  panState = null;
+}
+
+function toggleMapAssistant(mode = "guide") {
+  const panel = document.querySelector("#mapAssistantPanel");
+  if (!panel) return;
+  const isOpen = !panel.classList.contains("hidden") && panel.dataset.mode === mode;
+  if (isOpen) {
+    panel.classList.add("hidden");
+    return;
+  }
+  panel.dataset.mode = mode;
+  panel.classList.remove("hidden");
+  panel.innerHTML = mode === "checklist" ? mapChecklistHtml() : mapGuideHtml(mode);
+  panel.querySelector("[data-close-assistant]")?.addEventListener("click", () => panel.classList.add("hidden"));
+}
+
+function mapGuideHtml(mode) {
+  const title = mode === "help" ? "Ajuda da ferramenta" : "Assistente do Grid";
+  return `
+    <article class="assistant-paper">
+      <button type="button" data-close-assistant>Fechar</button>
+      <h3>${title}</h3>
+      <ol>
+        <li>Defina colunas, linhas, tamanho, offset, snap e coordenadas em Grid.</li>
+        <li>Use Fundo para subir uma imagem e alinhar opacidade, escala e posicao.</li>
+        <li>Escolha Parede ou Porta e clique em dois pontos do mapa para criar uma linha.</li>
+        <li>Desenhar a mesma porta alterna: fechada, aberta, trancada e secreta.</li>
+        <li>Ative Neblina e use Revelar/Ocultar para controlar areas vistas.</li>
+        <li>Segure espaco e arraste, ou use o botao do meio do mouse, para navegar.</li>
+      </ol>
+      <p><b>Regra operacional:</b> paredes e portas fechadas/trancadas/secretas bloqueiam luz e visao.</p>
+    </article>
+  `;
+}
+
+function mapChecklistHtml() {
+  const map = state.map || {};
+  const checks = [
+    ["Imagem de fundo", Boolean(map.background?.src)],
+    ["Grid configurado", map.cols > 0 && map.rows > 0],
+    ["Tokens posicionados", state.tokens.length > 0],
+    ["Paredes/portas registradas", (map.edges || []).length > 0 || (map.marks || []).length > 0],
+    ["Neblina configurada", map.fog?.enabled === true],
+    ["Luz ambiente conferida", Number.isFinite(Number(map.darkness))],
+    ["Mapa salvo", true]
+  ];
+  return `
+    <article class="assistant-paper">
+      <button type="button" data-close-assistant>Fechar</button>
+      <h3>Checklist do Arquivo</h3>
+      <ul>${checks.map(([label, ok]) => `<li class="${ok ? "done" : ""}">${ok ? "✓" : "□"} ${escapeHtml(label)}</li>`).join("")}</ul>
+      <p>${checks.every(([, ok]) => ok) ? "ARQUIVO PRONTO." : "Pendencias registradas para o mestre."}</p>
+    </article>
+  `;
+}
+
 function removeMapBackground() {
   state.map = normalizeMap(state.map);
   state.map.background = defaultMapBackground();
@@ -2899,11 +3612,17 @@ function hexToRgba(hex, alpha = 1) {
 
 function renderSheets() {
   els.sheetList.innerHTML = "";
-  state.sheets.forEach((sheet) => {
+  const user = currentUser();
+  const campaign = currentCampaign();
+  const visibleSheets = isMasterMode()
+    ? state.sheets.filter((sheet) => !campaign?.personagens?.length || (campaign.personagens || []).includes(sheet.id))
+    : state.sheets.filter((sheet) => (user?.sheetIds || []).includes(sheet.id));
+  visibleSheets.forEach((sheet) => {
     const safeSheet = normalizeSheet(sheet);
     const card = document.createElement("article");
     card.className = "sheet-card";
     card.innerHTML = `
+      <div class="sheet-card-photo ${safeSheet.portrait ? "has-photo" : ""}" style="${safeSheet.portrait ? `background-image:url('${escapeAttr(safeSheet.portrait)}')` : ""}">${safeSheet.portrait ? "" : escapeHtml(initials(safeSheet.name || "AG"))}</div>
       <div class="sheet-identity">
         <span class="sheet-name">${escapeHtml(safeSheet.name || "Agente sem nome")}</span>
         <span>${escapeHtml(safeSheet.rank || "Sem patente")}</span>
@@ -3252,8 +3971,16 @@ function animateDiceRoll(result) {
     els.diceStage.append(node);
   });
 
+  const specialClass = rollSpecialClass(result);
+  if (specialClass) {
+    const runes = document.createElement("div");
+    runes.className = `roll-runes ${specialClass}`;
+    runes.innerHTML = Array.from({ length: 10 }, (_, index) => `<i style="--rune-index:${index}"></i>`).join("");
+    els.diceStage.append(runes);
+  }
+
   const total = document.createElement("div");
-  total.className = `dice-total persistent-total result-sweep ${rollSpecialClass(result)}`;
+  total.className = `dice-total persistent-total result-sweep ${specialClass}`;
   const specialLabel = rollSpecialLabel(result);
   const headline = specialLabel || (result.rollMode === "d20-test" ? `Resultado ${result.displayTotal}` : result.rollMode === "rps" ? result.displayTotal : "Resultados");
   total.innerHTML = `<strong>${escapeHtml(headline)}</strong><span>${escapeHtml(result.formula)} | ${escapeHtml(result.detail)}</span>`;
@@ -3263,14 +3990,14 @@ function animateDiceRoll(result) {
 function rollSpecialClass(result) {
   if (result?.narrative === "sucesso critico") return "roll-critical";
   if (result?.narrative === "falha critica") return "roll-fumble";
-  if (String(result?.narrative || "").includes("anulou")) return "roll-unstable";
+  if (String(result?.narrative || "").includes("anulou")) return "roll-cancelled";
   return "";
 }
 
 function rollSpecialLabel(result) {
   if (result?.narrative === "sucesso critico") return "SUCESSO CRITICO";
   if (result?.narrative === "falha critica") return "FALHA CRITICA";
-  if (String(result?.narrative || "").includes("anulou")) return "SUCESSO INSTAVEL";
+  if (String(result?.narrative || "").includes("anulou")) return "CRITICO ANULADO";
   return "";
 }
 
@@ -3739,6 +4466,18 @@ els.battlefield.addEventListener("drop", (event) => {
     renderAll();
   }
 });
+document.querySelector(".battlefield-wrap")?.addEventListener("mousedown", startMapPan);
+window.addEventListener("mousemove", moveMapPan);
+window.addEventListener("mouseup", stopMapPan);
+window.addEventListener("keydown", (event) => {
+  if (event.code === "Space") isSpacePressed = true;
+});
+window.addEventListener("keyup", (event) => {
+  if (event.code === "Space") {
+    isSpacePressed = false;
+    stopMapPan();
+  }
+});
 
 document.querySelector("#resizeGrid").addEventListener("click", resizeGrid);
 document.querySelector("#addToken").addEventListener("click", addToken);
@@ -3747,8 +4486,13 @@ document.querySelector("#quickResizeGrid")?.addEventListener("click", () => {
   state.map.cols = clamp(Number(els.quickGridCols?.value || state.map.cols), 6, 100);
   state.map.rows = clamp(Number(els.quickGridRows?.value || state.map.rows), 6, 100);
   state.map.cellSize = clamp(Number(els.quickCellSize?.value || state.map.cellSize), 18, 64);
+  state.map.gridOffsetX = clamp(Number(els.quickGridOffsetX?.value || 0), -100, 100);
+  state.map.gridOffsetY = clamp(Number(els.quickGridOffsetY?.value || 0), -100, 100);
   state.map.gridOpacity = clamp(Number(els.quickGridOpacity?.value ?? state.map.gridOpacity), 0, 100);
   state.map.gridColor = els.quickGridColor?.value || state.map.gridColor;
+  state.map.thickEvery = clamp(Number(els.quickThickEvery?.value ?? state.map.thickEvery), 0, 20);
+  state.map.snap = els.quickSnap?.checked !== false;
+  state.map.coordinates = els.quickCoordinates?.checked === true;
   els.gridCols.value = state.map.cols;
   els.gridRows.value = state.map.rows;
   state.tokens.forEach((token) => {
@@ -3756,7 +4500,12 @@ document.querySelector("#quickResizeGrid")?.addEventListener("click", () => {
     token.y = Math.min(token.y, state.map.rows - 1);
   });
   state.map.marks = (state.map.marks || []).filter((mark) => mark.x < state.map.cols && mark.y < state.map.rows);
+  state.map.edges = (state.map.edges || []).filter((edge) => edge.x1 <= state.map.cols && edge.x2 <= state.map.cols && edge.y1 <= state.map.rows && edge.y2 <= state.map.rows);
   state.map.fog.revealed = (state.map.fog.revealed || []).filter((key) => {
+    const [x, y] = key.split(",").map(Number);
+    return x < state.map.cols && y < state.map.rows;
+  });
+  state.map.fog.visible = (state.map.fog.visible || []).filter((key) => {
     const [x, y] = key.split(",").map(Number);
     return x < state.map.cols && y < state.map.rows;
   });
@@ -3768,14 +4517,45 @@ document.querySelector("#quickAddToken")?.addEventListener("click", () => {
 document.querySelector("#quickAddNpc")?.addEventListener("click", () => {
   if (isMasterMode()) addNpcToken();
 });
+els.npcImage?.addEventListener("change", () => {
+  const file = els.npcImage.files?.[0];
+  if (!file) {
+    pendingNpcPortrait = "";
+    return;
+  }
+  if (!file.type.startsWith("image/")) {
+    window.alert("Escolha uma imagem para o NPC.");
+    els.npcImage.value = "";
+    pendingNpcPortrait = "";
+    return;
+  }
+  const reader = new FileReader();
+  reader.addEventListener("load", () => {
+    pendingNpcPortrait = reader.result || "";
+  });
+  reader.readAsDataURL(file);
+});
 els.mapTool?.addEventListener("change", () => {
   if (!isMasterMode()) return;
+  pendingMapEdgeStart = null;
   state.map.tool = els.mapTool.value;
   renderAll();
 });
 els.fogEnabled?.addEventListener("change", () => {
   if (!isMasterMode()) return;
   state.map.fog = { ...defaultFog(), ...(state.map.fog || {}), enabled: els.fogEnabled.checked };
+  if (state.map.fog.enabled && state.map.fog.mode === "vision") updateFogVisibilityFromTokens();
+  renderAll();
+});
+els.fogMode?.addEventListener("change", () => {
+  if (!isMasterMode()) return;
+  state.map.fog = { ...defaultFog(), ...(state.map.fog || {}), enabled: true, mode: els.fogMode.value === "vision" ? "vision" : "manual" };
+  if (state.map.fog.mode === "vision") updateFogVisibilityFromTokens();
+  renderAll();
+});
+els.fogKeepExplored?.addEventListener("change", () => {
+  if (!isMasterMode()) return;
+  state.map.fog = { ...defaultFog(), ...(state.map.fog || {}), keepExplored: els.fogKeepExplored.checked };
   renderAll();
 });
 document.querySelector("#revealAllFog")?.addEventListener("click", () => {
@@ -3786,11 +4566,20 @@ document.querySelector("#revealAllFog")?.addEventListener("click", () => {
     for (let x = 0; x < state.map.cols; x += 1) revealed.push(cellKey(x, y));
   }
   state.map.fog.revealed = revealed;
+  state.map.fog.visible = revealed;
   renderAll();
 });
 document.querySelector("#hideAllFog")?.addEventListener("click", () => {
   if (!isMasterMode()) return;
-  state.map.fog = { ...defaultFog(), ...(state.map.fog || {}), enabled: true, revealed: [] };
+  state.map.fog = { ...defaultFog(), ...(state.map.fog || {}), enabled: true, revealed: [], visible: [] };
+  renderAll();
+});
+document.querySelector("#revealByVision")?.addEventListener("click", () => {
+  if (isMasterMode()) revealFogByTokenVision();
+});
+document.querySelector("#previewPlayerVision")?.addEventListener("click", () => {
+  if (!isMasterMode()) return;
+  mapPlayerPreview = !mapPlayerPreview;
   renderAll();
 });
 els.mapImageInput?.addEventListener("change", () => {
@@ -3806,6 +4595,10 @@ document.querySelector("#fitGridToView")?.addEventListener("click", fitGridToVie
 document.querySelector("#zoomOutGrid")?.addEventListener("click", () => zoomGrid(-6));
 document.querySelector("#zoomInGrid")?.addEventListener("click", () => zoomGrid(6));
 document.querySelector("#resetGridZoom")?.addEventListener("click", resetGridZoom);
+document.querySelector("#centerTokenView")?.addEventListener("click", centerTokenView);
+document.querySelector("#gridAssistantButton")?.addEventListener("click", () => toggleMapAssistant("guide"));
+document.querySelector("#mapHelpButton")?.addEventListener("click", () => toggleMapAssistant("help"));
+document.querySelector("#mapChecklistButton")?.addEventListener("click", () => toggleMapAssistant("checklist"));
 window.addEventListener("resize", () => {
   if (state.activeTab === "mesa") window.setTimeout(fitGridToView, 80);
 });
