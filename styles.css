@@ -267,9 +267,10 @@ label {
   z-index: 2;
   display: grid;
   place-items: center;
-  width: calc(var(--cell-size) - 8px);
-  height: calc(var(--cell-size) - 8px);
-  margin: 4px;
+  --token-size: calc((var(--cell-size) - 8px) * var(--token-scale, 1));
+  width: var(--token-size);
+  height: var(--token-size);
+  margin: calc((var(--cell-size) - var(--token-size)) / 2);
   border: 2px solid rgba(255, 255, 255, 0.82);
   border-radius: 50%;
   color: #fff;
@@ -372,7 +373,7 @@ label {
 }
 
 .dice-total strong {
-  font-size: clamp(2rem, 7vw, 4.5rem);
+  font-size: clamp(1.15rem, 5vw, 2rem);
   line-height: 1;
 }
 
@@ -1316,6 +1317,25 @@ label {
   min-height: 18px;
   color: #493d32;
   font-size: .64rem;
+}
+
+.derived-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.derived-summary span {
+  border: 1px solid rgba(52, 37, 27, .46);
+  background: rgba(237, 226, 206, .46);
+  padding: 6px 9px;
+  color: #2e241b;
+  font-size: .75rem;
+}
+
+.derived-summary b {
+  text-transform: uppercase;
 }
 
 .paper-stat-double div {

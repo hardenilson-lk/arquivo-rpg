@@ -10,7 +10,7 @@ const state = {
   activeSheetId: null,
   accounts: [],
   campaigns: [],
-  map: { name: "Base da equipe", cols: 16, rows: 12, darkness: 58, lightsOn: true, cellSize: 56, gridOpacity: 38, gridColor: "#debc79", background: defaultMapBackground(), fog: defaultFog(), marks: [], tool: "move" },
+  map: { name: "Base da equipe", cols: 16, rows: 12, darkness: 58, lightsOn: true, cellSize: 56, tokenScale: 100, gridOpacity: 38, gridColor: "#debc79", background: defaultMapBackground(), fog: defaultFog(), marks: [], tool: "move" },
   tokens: [],
   sheets: [],
   rolls: [],
@@ -23,6 +23,8 @@ let pendingMapEdgeStart = null;
 let isSpacePressed = false;
 let panState = null;
 let mapPlayerPreview = false;
+let diceClearTimer = null;
+let masterInventorySheetId = null;
 
 const els = {
   battlefield: document.querySelector("#battlefield"),
@@ -60,10 +62,14 @@ const els = {
   quickTokenName: document.querySelector("#quickTokenName"),
   quickTokenColor: document.querySelector("#quickTokenColor"),
   quickTokenLight: document.querySelector("#quickTokenLight"),
+  quickTokenScale: document.querySelector("#quickTokenScale"),
   npcName: document.querySelector("#npcName"),
   npcColor: document.querySelector("#npcColor"),
   npcHp: document.querySelector("#npcHp"),
+  npcDefense: document.querySelector("#npcDefense"),
+  npcLight: document.querySelector("#npcLight"),
   npcType: document.querySelector("#npcType"),
+  npcAttack: document.querySelector("#npcAttack"),
   npcImage: document.querySelector("#npcImage"),
   npcHidden: document.querySelector("#npcHidden"),
   lightsOn: document.querySelector("#lightsOn"),
@@ -72,6 +78,7 @@ const els = {
   crisisSheet: document.querySelector("#crisisSheet"),
   sheetList: document.querySelector("#sheetList"),
   masterShield: document.querySelector("#masterShield"),
+  npcMiniCards: document.querySelector("#npcMiniCards"),
   missionsApp: document.querySelector("#missionsApp"),
   chatLog: document.querySelector("#chatLog"),
   chatForm: document.querySelector("#chatForm"),
@@ -252,6 +259,34 @@ catalog.nex = [
   "5%", "10%", "15%", "20%", "25%", "30%", "35%", "40%", "45%", "50%",
   "55%", "60%", "65%", "70%", "75%", "80%", "85%", "90%", "95%", "99%"
 ].map((name) => ({ name, type: "NEX", desc: `Marco de evolucao ${name}. Libera habilidades e rituais compativeis com este patamar.` }));
+
+const nexProgression = [
+  { nex: 5, gains: ["Inicio da ficha: origem, classe e trilha escolhidas.", "Recursos base da classe entram na ficha.", "Conjuradores liberam rituais de 1 circulo."] },
+  { nex: 10, gains: ["Ganha os pontos de recurso do marco.", "Habilidade inicial de trilha, quando aplicavel pela mesa.", "Catalogo passa a considerar NEX 10%."] },
+  { nex: 15, gains: ["Ganha os pontos de recurso do marco.", "Escolha 1 poder da sua classe, se a classe permitir.", "Catalogo de poderes filtra por classe e NEX."] },
+  { nex: 20, gains: ["Ganha os pontos de recurso do marco.", "Aumento de atributo: +1 ponto em um atributo permitido.", "PE por rodada aumenta em +1."] },
+  { nex: 25, gains: ["Ganha os pontos de recurso do marco.", "Conjuradores liberam rituais de 2 circulo.", "Novas opcoes de classe podem aparecer no catalogo."] },
+  { nex: 30, gains: ["Ganha os pontos de recurso do marco.", "Novo poder/melhoria de classe conforme classe e catalogo.", "Revisar ataques, pericias e itens ativos."] },
+  { nex: 35, gains: ["Ganha os pontos de recurso do marco.", "Grau de treinamento: melhore pericias conforme a regra da mesa.", "Recalculo de bonus de pericia fica disponivel."] },
+  { nex: 40, gains: ["Ganha os pontos de recurso do marco.", "Habilidade de trilha.", "PE por rodada aumenta em +1."] },
+  { nex: 45, gains: ["Ganha os pontos de recurso do marco.", "Novo poder/melhoria de classe conforme classe e catalogo.", "Recalculo completo de PV, PE, SAN, defesa e esquiva."] },
+  { nex: 50, gains: ["Ganha os pontos de recurso do marco.", "Versatilidade: escolha recurso de outra trilha conforme regra da mesa.", "Atualize habilidades/talentos da ficha."] },
+  { nex: 55, gains: ["Ganha os pontos de recurso do marco.", "Conjuradores liberam rituais de 3 circulo.", "Rituais disponiveis sao filtrados pelo novo limite."] },
+  { nex: 60, gains: ["Ganha os pontos de recurso do marco.", "Novo poder/melhoria de classe conforme classe e catalogo.", "PE por rodada aumenta em +1."] },
+  { nex: 65, gains: ["Ganha os pontos de recurso do marco.", "Habilidade superior de trilha.", "Atualize ataques, rituais e itens que dependem da trilha."] },
+  { nex: 70, gains: ["Ganha os pontos de recurso do marco.", "Recalculo de limite de sobrevivencia da ficha.", "Revise protecao, carga e equipamentos ativos."] },
+  { nex: 75, gains: ["Ganha os pontos de recurso do marco.", "Novo poder/melhoria de classe conforme classe e catalogo.", "Catalogo libera opcoes de alto NEX."] },
+  { nex: 80, gains: ["Ganha os pontos de recurso do marco.", "PE por rodada aumenta em +1.", "Marco alto: revisar efeitos ativos e consequencias narrativas."] },
+  { nex: 85, gains: ["Ganha os pontos de recurso do marco.", "Conjuradores liberam rituais de 4 circulo.", "Rituais extremos entram no catalogo se a ficha puder conjurar."] },
+  { nex: 90, gains: ["Ganha os pontos de recurso do marco.", "Novo poder/melhoria de classe conforme classe e catalogo.", "Atualize poderes finais e preparacao de combate."] },
+  { nex: 95, gains: ["Ganha os pontos de recurso do marco.", "Marco final antes do limite.", "Revise toda a ficha: pericias, recursos, inventario e rituais."] },
+  { nex: 99, gains: ["Ganha os pontos de recurso do marco.", "Habilidade final de classe/trilha, quando aplicavel.", "Ocultistas podem acessar Canalizar o Medo quando aplicavel."] }
+];
+
+catalog.nex.forEach((entry) => {
+  const step = nexProgression.find((item) => item.nex === parseNex(entry.name));
+  if (step) entry.desc = `Marco de evolucao ${entry.name}. Ganhos: ${step.gains.join("; ")}.`;
+});
 
 catalog.abilities.push(
   { name: "Poder de Combatente", type: "Escolha de NEX", className: "Combatente", nex: 15, desc: "Escolha um poder de combatente compativel com o conceito do personagem." },
@@ -466,6 +501,7 @@ function normalizeMap(map = {}) {
     darkness: clamp(Number(map.darkness ?? 50), 0, 90),
     lightsOn: map.lightsOn !== false,
     cellSize: clamp(Number(map.cellSize ?? 48), 18, 64),
+    tokenScale: clamp(Number(map.tokenScale ?? 100), 70, 145),
     gridOffsetX: clamp(Number(map.gridOffsetX ?? 0), -100, 100),
     gridOffsetY: clamp(Number(map.gridOffsetY ?? 0), -100, 100),
     gridOpacity: clamp(Number(map.gridOpacity ?? 38), 0, 100),
@@ -1293,6 +1329,7 @@ function renderAll() {
   renderGrid();
   renderTokenList();
   renderMasterShield();
+  renderNpcMiniCards();
   renderMissionsView();
   renderChatView();
   renderCrisisSheet();
@@ -1307,11 +1344,11 @@ function renderAll() {
 
 function renderControls() {
   state.map = normalizeMap(state.map);
-  els.mapName.value = state.map.name;
-  els.gridCols.value = state.map.cols;
-  els.gridRows.value = state.map.rows;
-  els.lightsOn.checked = state.map.lightsOn;
-  els.darkness.value = state.map.darkness;
+  if (els.mapName) els.mapName.value = state.map.name;
+  if (els.gridCols) els.gridCols.value = state.map.cols;
+  if (els.gridRows) els.gridRows.value = state.map.rows;
+  if (els.lightsOn) els.lightsOn.checked = state.map.lightsOn;
+  if (els.darkness) els.darkness.value = state.map.darkness;
   if (els.quickGridCols) els.quickGridCols.value = state.map.cols;
   if (els.quickGridRows) els.quickGridRows.value = state.map.rows;
   if (els.quickCellSize) els.quickCellSize.value = state.map.cellSize;
@@ -1324,6 +1361,7 @@ function renderControls() {
   if (els.quickCoordinates) els.quickCoordinates.checked = state.map.coordinates === true;
   if (els.quickLightsOn) els.quickLightsOn.checked = state.map.lightsOn;
   if (els.quickDarkness) els.quickDarkness.value = state.map.darkness;
+  if (els.quickTokenScale) els.quickTokenScale.value = state.map.tokenScale;
   if (els.mapTool) els.mapTool.value = state.map.tool || "move";
   if (els.fogEnabled) els.fogEnabled.checked = state.map.fog?.enabled === true;
   if (els.fogMode) els.fogMode.value = state.map.fog?.mode || "manual";
@@ -1352,6 +1390,7 @@ function renderGrid() {
   els.battlefield.style.setProperty("--grid-line-color", hexToRgba(state.map.gridColor, state.map.gridOpacity / 100));
   els.battlefield.style.setProperty("--grid-offset-x", `${state.map.gridOffsetX}px`);
   els.battlefield.style.setProperty("--grid-offset-y", `${state.map.gridOffsetY}px`);
+  els.battlefield.style.setProperty("--token-scale", (state.map.tokenScale || 100) / 100);
   els.battlefield.dataset.coordinates = state.map.coordinates ? "true" : "false";
   els.battlefield.dataset.thickEvery = state.map.thickEvery || 0;
   els.battlefield.innerHTML = "";
@@ -1369,7 +1408,7 @@ function renderGrid() {
         cell.innerHTML = `<span class="cell-coordinate">${x + 1},${y + 1}</span>`;
       }
       if (state.map.thickEvery && (x % state.map.thickEvery === 0 || y % state.map.thickEvery === 0)) cell.dataset.thick = "true";
-      const mark = mapMarkAt(x, y);
+      const mark = !isPlayerMapView() ? mapMarkAt(x, y) : null;
       if (mark) {
         cell.dataset.mark = mark.type;
         if (mark.open) cell.dataset.open = "true";
@@ -1553,7 +1592,7 @@ function renderMapEdges() {
 
 function cellClass(x, y) {
   const classes = ["cell"];
-  const mark = mapMarkAt(x, y);
+  const mark = !isPlayerMapView() ? mapMarkAt(x, y) : null;
   if (mark) classes.push(mark.type === "door" ? (mark.open ? "door-open" : "door-closed") : "wall-cell");
   if (state.map.fog?.enabled) {
     const visible = isFogVisible(x, y);
@@ -1571,7 +1610,7 @@ function cellClass(x, y) {
   if (!state.map.lightsOn) return classes.join(" ");
   const lit = state.tokens
     .filter((token) => !isPlayerMapView() || !token.hidden)
-    .some((token) => distance(token.x, token.y, x, y) <= Number(token.light) && !isSightBlocked(token.x, token.y, x, y));
+    .some((token) => distance(token.x, token.y, x, y) <= tokenVisionRangeForCell(token, x, y) && !isSightBlocked(token.x, token.y, x, y));
   classes.push(lit ? "lit" : "dark");
   return classes.join(" ");
 }
@@ -1905,6 +1944,7 @@ function rotateTokenFacing(tokenId) {
 }
 
 function renderTokenList() {
+  if (!els.tokenList) return;
   els.tokenList.innerHTML = "";
   state.tokens.filter((token) => state.currentMode === "master" || !token.hidden).forEach((token) => {
     const canEdit = canControlToken(token);
@@ -1913,7 +1953,7 @@ function renderTokenList() {
     row.innerHTML = `
       <div>
         <strong>${escapeHtml(token.name)}</strong>
-        <small>${escapeHtml(token.label || (token.type === "npc" ? "NPC/Criatura" : "Personagem"))} | ${token.x + 1},${token.y + 1} | Frente ${facingLabel(token.facing)}${token.hidden ? " | invisivel" : ""}</small>
+        <small>${escapeHtml(token.label || (token.type === "npc" ? "NPC/Criatura" : "Personagem"))} | ${token.x + 1},${token.y + 1} | Frente ${facingLabel(token.facing)}${token.defense ? ` | Def ${escapeHtml(token.defense)}` : ""}${token.attack ? ` | ${escapeHtml(token.attack)}` : ""}${token.hidden ? " | invisivel" : ""}</small>
       </div>
       <span>PV ${escapeHtml(token.hp ?? "?")} / ${escapeHtml(token.hpMax ?? "?")}<br>Luz ${escapeHtml(token.light)}</span>
       ${canEdit ? `<div class="damage-inline"><input data-token-damage="${escapeAttr(token.id)}" type="number" min="0" placeholder="Dano" /><button type="button" data-token-damage-apply="${escapeAttr(token.id)}">Dano</button><button type="button" data-token-heal-apply="${escapeAttr(token.id)}">Cura</button></div>` : ""}
@@ -1958,6 +1998,73 @@ function renderTokenList() {
 
 function facingLabel(facing = "s") {
   return { n: "Norte", e: "Leste", s: "Sul", w: "Oeste" }[facing] || "Sul";
+}
+
+function renderNpcMiniCards() {
+  if (!els.npcMiniCards) return;
+  const npcs = state.tokens.filter((token) => token.type === "npc" && (state.currentMode === "master" || !token.hidden));
+  if (!npcs.length) {
+    els.npcMiniCards.innerHTML = `<p>Nenhum NPC criado no grid.</p>`;
+    return;
+  }
+  els.npcMiniCards.innerHTML = npcs.map((token) => {
+    const portrait = token.portrait
+      ? `<span class="npc-mini-portrait" style="background-image:url('${escapeAttr(token.portrait)}')"></span>`
+      : `<span class="npc-mini-portrait fallback">${escapeHtml(initials(token.name || "NPC"))}</span>`;
+    return `
+      <article class="npc-mini-card${token.hidden ? " hidden-token-row" : ""}">
+        ${portrait}
+        <div class="npc-mini-body">
+          <b>${escapeHtml(token.name || "NPC")}</b>
+          <span>${escapeHtml(token.label || "NPC/Criatura")} | ${token.x + 1},${token.y + 1} | Frente ${facingLabel(token.facing)}</span>
+          <small>PV ${escapeHtml(token.hp ?? "?")} / ${escapeHtml(token.hpMax ?? "?")} | Def ${escapeHtml(token.defense ?? 10)} | Luz ${escapeHtml(token.light ?? 0)}</small>
+          ${token.attack ? `<small>Ataque: ${escapeHtml(token.attack)}</small>` : ""}
+          <div class="shield-bars compact-bars">
+            ${shieldBar("PV", token.hp, token.hpMax, "#a82924")}
+          </div>
+          <div class="damage-inline">
+            <input data-npc-damage="${escapeAttr(token.id)}" type="number" min="0" placeholder="Dano" />
+            <button type="button" data-npc-damage-apply="${escapeAttr(token.id)}">Dano</button>
+            <button type="button" data-npc-heal-apply="${escapeAttr(token.id)}">Cura</button>
+          </div>
+          <div class="npc-mini-actions">
+            <button type="button" data-npc-rotate="${escapeAttr(token.id)}">Virar</button>
+            <button type="button" data-npc-hide="${escapeAttr(token.id)}">${token.hidden ? "Mostrar" : "Ocultar"}</button>
+            <button type="button" data-npc-remove="${escapeAttr(token.id)}">Remover</button>
+          </div>
+        </div>
+      </article>
+    `;
+  }).join("");
+  els.npcMiniCards.querySelectorAll("[data-npc-damage-apply]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const input = els.npcMiniCards.querySelector(`[data-npc-damage="${selectorEscape(button.dataset.npcDamageApply)}"]`);
+      applyTokenDamage(button.dataset.npcDamageApply, Number(input?.value || 0), "damage");
+    });
+  });
+  els.npcMiniCards.querySelectorAll("[data-npc-heal-apply]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const input = els.npcMiniCards.querySelector(`[data-npc-damage="${selectorEscape(button.dataset.npcHealApply)}"]`);
+      applyTokenDamage(button.dataset.npcHealApply, Number(input?.value || 0), "heal");
+    });
+  });
+  els.npcMiniCards.querySelectorAll("[data-npc-rotate]").forEach((button) => {
+    button.addEventListener("click", () => rotateTokenFacing(button.dataset.npcRotate));
+  });
+  els.npcMiniCards.querySelectorAll("[data-npc-hide]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const token = state.tokens.find((item) => item.id === button.dataset.npcHide);
+      if (!token) return;
+      token.hidden = !token.hidden;
+      renderAll();
+    });
+  });
+  els.npcMiniCards.querySelectorAll("[data-npc-remove]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.tokens = state.tokens.filter((item) => item.id !== button.dataset.npcRemove);
+      renderAll();
+    });
+  });
 }
 
 function renderMasterShield() {
@@ -2034,6 +2141,8 @@ function addToken(source = "sidebar") {
 function addNpcToken() {
   const name = els.npcName?.value.trim() || `NPC ${state.tokens.length + 1}`;
   const hp = clamp(Number(els.npcHp?.value || 20), 1, 999);
+  const defense = clamp(Number(els.npcDefense?.value || 10), 0, 99);
+  const light = clamp(Number(els.npcLight?.value || 0), 0, 10);
   state.tokens.push({
     id: crypto.randomUUID(),
     name,
@@ -2041,15 +2150,18 @@ function addNpcToken() {
     label: els.npcType?.value.trim() || "NPC/Criatura",
     color: els.npcColor?.value || "#7b241c",
     portrait: pendingNpcPortrait,
-    light: 0,
+    light,
     hidden: els.npcHidden?.checked === true,
     facing: "s",
+    defense,
+    attack: els.npcAttack?.value.trim() || "",
     hp,
     hpMax: hp,
     x: Math.floor(state.map.cols / 2),
     y: Math.floor(state.map.rows / 2)
   });
   if (els.npcName) els.npcName.value = "";
+  if (els.npcAttack) els.npcAttack.value = "";
   if (els.npcImage) els.npcImage.value = "";
   pendingNpcPortrait = "";
   renderAll();
@@ -2073,9 +2185,11 @@ function renderCrisisSheet() {
       <div class="dossier-left">
         <div class="dossier-identity">
           <div class="profile-photo-box">
-            <div class="profile-photo-preview" style="${sheet.portrait ? `background-image:url('${escapeAttr(sheet.portrait)}')` : ""}">${sheet.portrait ? "" : escapeHtml(initials(sheet.name || "AG"))}</div>
-            <label>Foto do agente <input data-profile-photo type="file" accept="image/*" /></label>
-            ${sheet.portrait ? `<button type="button" data-clear-profile-photo>Remover foto</button>` : ""}
+            <label class="profile-photo-trigger" title="Trocar foto do agente">
+              <span class="profile-photo-preview" style="${sheet.portrait ? `background-image:url('${escapeAttr(sheet.portrait)}')` : ""}">${sheet.portrait ? "" : escapeHtml(initials(sheet.name || "AG"))}</span>
+              <input data-profile-photo type="file" accept="image/*" />
+            </label>
+            ${sheet.portrait ? `<button class="profile-photo-clear" type="button" data-clear-profile-photo title="Remover foto">x</button>` : ""}
           </div>
           <label>Personagem <input data-sheet-field="name" value="${escapeAttr(sheet.name || "Agente")}" /></label>
           <label>Jogador <input data-sheet-field="player" value="${escapeAttr(sheet.player)}" /></label>
@@ -2105,8 +2219,9 @@ function renderCrisisSheet() {
         <div class="progress-row">
           <label>Nivel <input data-sheet-field="rank" value="${escapeAttr(sheet.rank || "")}" /></label>
           <label class="nex-field">Exp / NEX <span><input data-sheet-field="nex" value="${escapeAttr(sheet.nex || "0%")}" /><button type="button" data-open-catalog="nex">Catalogo</button></span></label>
-          <label>Pontos de atributo <input data-sheet-field="peRound" type="number" value="${sheet.peRound}" /></label>
+          <label>PE / rodada <input data-sheet-field="peRound" type="number" value="${sheet.peRound}" /></label>
         </div>
+        ${renderNexProgress(sheet)}
 
         <div class="vitals-grid">
           ${paperStatBox("PV", "Pontos de vida", "hp", "hpMax", sheet.hp, sheet.hpMax)}
@@ -2115,6 +2230,11 @@ function renderCrisisSheet() {
           <label class="paper-stat"><b>Protecao</b><small>Reducao de dano</small><input data-sheet-field="block" type="number" value="${sheet.block}" /></label>
           ${paperStatBox("Sanidade", "Resistencia mental", "san", "sanMax", sheet.san, sheet.sanMax)}
           <label class="paper-stat"><b>Esquiva</b><small>Ajuste defensivo</small><input data-sheet-field="dodge" type="number" value="${sheet.dodge}" /></label>
+        </div>
+        <div class="derived-summary">
+          <span><b>Deslocamento</b> ${escapeHtml(sheet.movement)} m</span>
+          <span><b>Carga</b> ${escapeHtml(sheet.currentLoad || 0)} / ${escapeHtml(sheet.loadLimit || Math.max(1, Number(sheet.str || 0) * 5))}</span>
+          <span><b>Recalculo</b> classe, NEX, atributos e itens ativos</span>
         </div>
         <div class="sheet-damage-tools">
           <label>Dano ou cura <input data-sheet-damage-value type="number" min="0" placeholder="0" /></label>
@@ -2690,14 +2810,14 @@ function inventoryItemMeta(item) {
   ];
 }
 
-function inventoryItemCard(raw, index) {
+function inventoryItemCard(raw, index, sheet = ensureActiveSheet()) {
   const item = parseInventoryItem(raw);
   const active = inventoryLineActive(raw);
   return `
     <article class="inventory-card ${active ? "item-active" : "item-inactive"}">
       <div class="inventory-photo-wrap">
-        ${catalogThumb(item.entry || { name: item.name, type: "Item" })}
-        <span>Foto aproximada</span>
+        ${inventoryItemThumb(item, sheet)}
+        <label class="item-image-picker">Trocar imagem <input data-inventory-image="${index}" type="file" accept="image/*" /></label>
       </div>
       <div class="inventory-card-body">
         <div class="inventory-card-head">
@@ -2715,6 +2835,7 @@ function inventoryItemCard(raw, index) {
           <label>Dano <input data-inventory-index="${index}" data-inventory-field="damage" value="${escapeAttr(item.stats.damage || "-")}" /></label>
           <label>Alcance <input data-inventory-index="${index}" data-inventory-field="range" value="${escapeAttr(item.stats.range || "-")}" /></label>
           <label>Bonus <input data-inventory-index="${index}" data-inventory-field="bonus" value="${escapeAttr(item.stats.bonus || item.stats.defense || "-")}" /></label>
+          <label>Imagem URL <input data-inventory-index="${index}" data-inventory-field="image" value="${escapeAttr(item.stats.image || "")}" placeholder="Cole uma URL ou envie arquivo" /></label>
         </div>
         <p>${escapeHtml(inventoryItemDescription(item))}</p>
       </div>
@@ -2722,23 +2843,59 @@ function inventoryItemCard(raw, index) {
   `;
 }
 
+function inventoryItemThumb(item, sheet) {
+  const savedImage = sheet?.itemImages?.[inventoryImageKey(item.name)] || item.stats?.image;
+  if (savedImage) {
+    return `<span class="catalog-thumb photo-thumb custom-photo-thumb" style="background-image:url('${escapeAttr(savedImage)}')"></span>`;
+  }
+  return catalogThumb(item.entry || { name: item.name, type: "Item" });
+}
+
+function inventoryImageKey(name) {
+  return normalizeKey(name || "item-sem-nome");
+}
+
 function renderInventoryView() {
   const container = document.querySelector("#inventoryApp");
   if (!container) return;
+  const linkedSheets = isMasterMode() ? sheetsLinkedToCampaign(currentCampaign()) : [];
+  if (isMasterMode() && linkedSheets.length) {
+    if (!masterInventorySheetId || !linkedSheets.some((sheet) => sheet.id === masterInventorySheetId)) masterInventorySheetId = linkedSheets[0].id;
+    state.activeSheetId = masterInventorySheetId;
+  }
   const sheet = ensureActiveSheet();
   const items = splitLines(sheet.inventory);
   container.innerHTML = `
+    ${isMasterMode() && linkedSheets.length ? `
+      <div class="inventory-sheet-picker">
+        ${linkedSheets.map((linked) => `
+          <button type="button" data-inventory-sheet="${escapeAttr(linked.id)}" class="${linked.id === sheet.id ? "selected" : ""}">
+            <span class="mini-sheet-photo" style="${linked.portrait ? `background-image:url('${escapeAttr(linked.portrait)}')` : ""}">${linked.portrait ? "" : escapeHtml(initials(linked.name || "AG"))}</span>
+            <b>${escapeHtml(linked.name || "Agente")}</b>
+            <small>${escapeHtml(linked.player || "Jogador")} | ${escapeHtml(linked.className || "Sem classe")} | ${escapeHtml(linked.nex || "5%")}</small>
+          </button>
+        `).join("")}
+      </div>
+    ` : ""}
     <div class="inventory-summary">
       <b>${escapeHtml(sheet.name || "Ficha ativa")}</b>
       <span>${items.length} item(ns) registrados</span>
     </div>
-    ${items.length ? `<div class="inventory-list detailed">${items.map((item, index) => inventoryItemCard(item, index)).join("")}</div>` : `<p>Nenhum equipamento cadastrado na ficha.</p>`}
+    ${items.length ? `<div class="inventory-list detailed">${items.map((item, index) => inventoryItemCard(item, index, sheet)).join("")}</div>` : `<p>Nenhum equipamento cadastrado na ficha.</p>`}
     <div class="inventory-actions">
       <button type="button" data-tab="fichas">Abrir ficha</button>
       <button type="button" data-inventory-add>Adicionar pelo catalogo</button>
       <button type="button" data-save-file>Salvar arquivo</button>
     </div>
   `;
+  container.querySelectorAll("[data-inventory-sheet]").forEach((button) => {
+    button.addEventListener("click", () => {
+      masterInventorySheetId = button.dataset.inventorySheet;
+      state.activeSheetId = masterInventorySheetId;
+      renderInventoryView();
+      renderCrisisSheet();
+    });
+  });
   container.querySelectorAll("[data-inventory-remove]").forEach((button) => {
     button.addEventListener("click", () => removeSheetLine("inventory", Number(button.dataset.inventoryRemove)));
   });
@@ -2748,6 +2905,9 @@ function renderInventoryView() {
   container.querySelectorAll("[data-inventory-field]").forEach((field) => {
     field.addEventListener("input", () => updateInventoryField(Number(field.dataset.inventoryIndex), field.dataset.inventoryField, field.value, false));
     field.addEventListener("change", () => updateInventoryField(Number(field.dataset.inventoryIndex), field.dataset.inventoryField, field.value));
+  });
+  container.querySelectorAll("[data-inventory-image]").forEach((field) => {
+    field.addEventListener("change", () => updateInventoryImage(Number(field.dataset.inventoryImage), field.files?.[0]));
   });
   container.querySelector("[data-inventory-add]")?.addEventListener("click", () => openCatalog("inventory"));
   container.querySelector("[data-tab]")?.addEventListener("click", () => switchTab("fichas"));
@@ -3016,6 +3176,85 @@ function parseNex(value) {
   return Number(String(value || "").match(/\d+/)?.[0] || 0);
 }
 
+function nexBonusesBetween(previous, next) {
+  return nexProgression.filter((step) => step.nex > previous && step.nex <= next);
+}
+
+function previousNexValue(nex) {
+  const index = nexProgression.findIndex((step) => step.nex === nex);
+  return index > 0 ? nexProgression[index - 1].nex : 0;
+}
+
+function resourceAtNex(sheet, nex) {
+  const base = classBaseStats(sheet);
+  const itemBonus = inventoryMechanicalBonuses(sheet);
+  const steps = Math.max(0, Math.floor(Number(nex || 0) / 5) - 1);
+  const vig = Number(sheet.vig || 0);
+  const pre = Number(sheet.pre || 0);
+  return {
+    hpMax: Math.max(1, base.hpStart + vig + steps * (base.hpPerStep + vig)),
+    peMax: Math.max(1, base.peStart + pre + steps * base.pePerStep),
+    sanMax: Math.max(1, base.sanStart + steps * base.sanPerStep),
+    peRound: Math.max(1, 1 + Math.floor(Number(nex || 0) / 20)),
+    defense: Math.max(0, 10 + Number(sheet.agi || 0) + itemBonus.defense),
+    dodgeBase: Math.max(0, 10 + Number(sheet.agi || 0) + itemBonus.defense)
+  };
+}
+
+function classResourceFormula(sheet) {
+  const base = classBaseStats(sheet);
+  return `Por marco de +5% apos 5%: +${base.hpPerStep} + VIG em PV max, +${base.pePerStep} PE max, +${base.sanPerStep} SAN max. Base em 5%: PV ${base.hpStart} + VIG, PE ${base.peStart} + PRE, SAN ${base.sanStart}.`;
+}
+
+function nexResourceLine(sheet, step) {
+  const current = resourceAtNex(sheet, step.nex);
+  const previousValue = previousNexValue(step.nex);
+  if (!previousValue) {
+    return `Totais em 5%: PV ${current.hpMax}, PE ${current.peMax}, SAN ${current.sanMax}, PE/rodada ${current.peRound}.`;
+  }
+  const previous = resourceAtNex(sheet, previousValue);
+  const peRoundDelta = current.peRound - previous.peRound;
+  return `Ganha neste marco: +${current.hpMax - previous.hpMax} PV max, +${current.peMax - previous.peMax} PE max, +${current.sanMax - previous.sanMax} SAN max${peRoundDelta ? `, +${peRoundDelta} PE/rodada` : ""}. Totais: PV ${current.hpMax}, PE ${current.peMax}, SAN ${current.sanMax}, PE/rodada ${current.peRound}.`;
+}
+
+function renderNexProgress(sheet) {
+  const current = parseNex(sheet.nex);
+  return `
+    <section class="nex-progress-panel">
+      <b>Progressao de NEX</b>
+      <p>NEX atual: ${escapeHtml(sheet.nex || "0%")}. ${escapeHtml(classResourceFormula(sheet))}</p>
+      <div class="nex-progress-table">
+        ${nexProgression.map((step) => `
+          <article class="${step.nex <= current ? "unlocked" : "locked"}">
+            <strong>${step.nex}%</strong>
+            <span>${escapeHtml(nexResourceLine(sheet, step))}</span>
+            <small>${step.gains.map(escapeHtml).join(" | ")}</small>
+          </article>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function showNexUpdateMessage(sheet, previousNex, nextNex) {
+  const gains = nexBonusesBetween(previousNex, nextNex);
+  if (!gains.length) return;
+  document.querySelector(".nex-toast")?.remove();
+  const toast = document.createElement("div");
+  toast.className = "nex-toast";
+  toast.innerHTML = `
+    <div>
+      <b>${escapeHtml(sheet.name || "Agente")} evoluiu para ${nextNex}% NEX</b>
+      <p>${escapeHtml(classResourceFormula(sheet))}</p>
+      ${gains.map((step) => `<p><strong>${step.nex}%</strong><br>${escapeHtml(nexResourceLine(sheet, step))}<br>${step.gains.map(escapeHtml).join(" | ")}</p>`).join("")}
+      <button type="button">Entendido</button>
+    </div>
+  `;
+  document.body.append(toast);
+  toast.querySelector("button")?.addEventListener("click", () => toast.remove());
+  window.setTimeout(() => toast.remove(), 12000);
+}
+
 function ritualNexRequirement(circle) {
   return {
     1: 5,
@@ -3058,9 +3297,9 @@ function removeSheetLine(field, index) {
 
 function classBaseStats(sheet) {
   const className = normalizeKey(sheet.className);
-  if (className === "combatente") return { hp: 20, san: 12 };
-  if (className === "ocultista") return { hp: 12, san: 20 };
-  return { hp: 16, san: 16 };
+  if (className === "combatente") return { hpStart: 20, hpPerStep: 4, sanStart: 12, sanPerStep: 3, peStart: 2, pePerStep: 1, movement: 9 };
+  if (className === "ocultista") return { hpStart: 12, hpPerStep: 2, sanStart: 20, sanPerStep: 5, peStart: 3, pePerStep: 1, movement: 9 };
+  return { hpStart: 16, hpPerStep: 3, sanStart: 16, sanPerStep: 4, peStart: 2, pePerStep: 1, movement: 9 };
 }
 
 function inventoryMechanicalBonuses(sheet) {
@@ -3068,17 +3307,24 @@ function inventoryMechanicalBonuses(sheet) {
     if (!inventoryLineActive(raw)) return bonus;
     const item = parseInventoryItem(raw);
     const defenseText = String(item.stats.defense || "");
+    const bonusText = normalizeKey(`${item.stats.bonus || ""} ${item.stats.category || ""} ${item.name || ""}`);
+    const volume = Number(String(item.stats.volume ?? 0).match(/[+-]?\d+/)?.[0] || 0);
     const defense = Number(defenseText.match(/[+-]?\d+/)?.[0] || 0);
     const key = normalizeKey(item.name);
+    bonus.volume += Math.max(0, volume);
     if (defense > 0) {
       bonus.defense += defense;
-      bonus.block += Math.max(1, Math.floor(defense / 5));
+      bonus.block += key.includes("pesada") ? 5 : 2;
     }
+    const protectionMatch = String(`${item.stats.bonus || ""} ${item.stats.defense || ""}`).match(/(?:protecao|proteção|reducao|redução|rd)\D*([+-]?\d+)/i);
+    if (protectionMatch) bonus.block += Math.max(0, Number(protectionMatch[1]) || 0);
+    if (key.includes("protecao pesada") || key.includes("proteção pesada")) bonus.movementPenalty += 1;
+    if (key.includes("mochila militar") || bonusText.includes("aumenta carga")) bonus.loadBonus += 5;
     if (key.includes("lanterna tatica")) bonus.light = Math.max(bonus.light, 6);
     else if (key.includes("lanterna")) bonus.light = Math.max(bonus.light, 5);
     if (key.includes("binoculos")) bonus.vision += 2;
     return bonus;
-  }, { defense: 0, block: 0, light: 0, vision: 0 });
+  }, { defense: 0, block: 0, light: 0, vision: 0, movementPenalty: 0, loadBonus: 0, volume: 0 });
 }
 
 function inventoryLineActive(raw) {
@@ -3110,7 +3356,8 @@ function updateInventoryField(index, field, value, rerender = true) {
     damage: "Dano",
     range: "Alcance",
     bonus: "Bonus",
-    defense: "Defesa"
+    defense: "Defesa",
+    image: "Imagem"
   };
   const metaText = Object.entries(meta)
     .filter(([, metaValue]) => String(metaValue || "").trim())
@@ -3123,15 +3370,41 @@ function updateInventoryField(index, field, value, rerender = true) {
   else save();
 }
 
+function updateInventoryImage(index, file) {
+  if (!file) return;
+  if (!file.type.startsWith("image/")) {
+    window.alert("Escolha uma imagem para o item.");
+    return;
+  }
+  const sheet = ensureActiveSheet();
+  const items = splitLines(sheet.inventory);
+  const item = parseInventoryItem(items[index] || "Item sem nome");
+  sheet.itemImages = sheet.itemImages || {};
+  const reader = new FileReader();
+  reader.addEventListener("load", () => {
+    sheet.itemImages[inventoryImageKey(item.name)] = reader.result || "";
+    renderAll();
+  });
+  reader.readAsDataURL(file);
+}
+
 function recalculateDerivedStats(sheet, changedField = "") {
   if (!sheet) return sheet;
   const base = classBaseStats(sheet);
   const itemBonus = inventoryMechanicalBonuses(sheet);
-  const maxHp = Math.max(1, base.hp + Number(sheet.vig || 0));
-  const maxPe = Math.max(1, 1 + Number(sheet.pre || 0) + Math.floor(parseNex(sheet.nex) / 20));
-  const maxSan = Math.max(1, base.san + Math.floor(parseNex(sheet.nex) / 10));
-  const defense = 10 + Number(sheet.agi || 0) + itemBonus.defense;
-  const dodge = defense + Number(parseSkills(sheet).find((skill) => normalizeKey(skill.name) === "reflexos")?.total || 0);
+  const nex = parseNex(sheet.nex);
+  const nexSteps = Math.max(0, Math.floor(nex / 5) - 1);
+  const agi = Number(sheet.agi || 0);
+  const pre = Number(sheet.pre || 0);
+  const vig = Number(sheet.vig || 0);
+  const reflexes = Number(parseSkills(sheet).find((skill) => normalizeKey(skill.name) === "reflexos")?.total || 0);
+  const maxHp = Math.max(1, base.hpStart + vig + nexSteps * (base.hpPerStep + vig));
+  const maxPe = Math.max(1, base.peStart + pre + nexSteps * base.pePerStep);
+  const maxSan = Math.max(1, base.sanStart + nexSteps * base.sanPerStep);
+  const defense = Math.max(0, 10 + agi + itemBonus.defense);
+  const dodge = Math.max(defense, defense + reflexes);
+  const movement = Math.max(3, base.movement - itemBonus.movementPenalty);
+  const peRound = Math.max(1, 1 + Math.floor(nex / 20));
   const preserveCurrent = (field, maxField, newMax) => {
     const current = Number(sheet[field]);
     const oldMax = Number(sheet[maxField]);
@@ -3144,22 +3417,32 @@ function recalculateDerivedStats(sheet, changedField = "") {
   preserveCurrent("pe", "peMax", maxPe);
   preserveCurrent("san", "sanMax", maxSan);
   sheet.defense = defense;
-  sheet.block = changedField === "inventory" ? itemBonus.block : Math.max(Number(sheet.block) || 0, itemBonus.block);
+  sheet.block = itemBonus.block;
   sheet.dodge = dodge;
+  sheet.movement = movement;
+  sheet.peRound = peRound;
+  sheet.loadLimit = Math.max(1, Number(sheet.str || 0) * 5 + itemBonus.loadBonus);
+  sheet.currentLoad = itemBonus.volume;
   syncSheetToken(sheet);
   return sheet;
 }
 
 function updateActiveSheet(field, value, numeric = false, rerender = true) {
   const sheet = ensureActiveSheet();
+  const previousNex = parseNex(sheet.nex);
   sheet[field] = numeric ? Number(value) : value;
   if (["agi", "str", "int", "pre", "vig", "className", "pathName", "nex", "inventory", "skills"].includes(field)) {
     recalculateDerivedStats(sheet, field);
   } else if (["portrait", "name", "className", "hp", "hpMax", "pe", "peMax", "san", "sanMax"].includes(field)) {
     syncSheetToken(sheet);
   }
-  if (rerender) renderAll();
-  else save();
+  if (rerender) {
+    renderAll();
+    if (field === "nex") {
+      const nextNex = parseNex(sheet.nex);
+      if (nextNex > previousNex) showNexUpdateMessage(sheet, previousNex, nextNex);
+    }
+  } else save();
 }
 
 function syncSheetToken(sheet = ensureActiveSheet()) {
@@ -3409,9 +3692,9 @@ function splitLines(text) {
 }
 
 function resizeGrid() {
-  state.map.name = els.mapName.value.trim() || "Mapa sem nome";
-  state.map.cols = clamp(Number(els.gridCols.value), 6, 100);
-  state.map.rows = clamp(Number(els.gridRows.value), 6, 100);
+  state.map.name = els.mapName?.value.trim() || state.map.name || "Mapa sem nome";
+  state.map.cols = clamp(Number(els.gridCols?.value || state.map.cols), 6, 100);
+  state.map.rows = clamp(Number(els.gridRows?.value || state.map.rows), 6, 100);
   state.tokens.forEach((token) => {
     token.x = Math.min(token.x, state.map.cols - 1);
     token.y = Math.min(token.y, state.map.rows - 1);
@@ -3780,6 +4063,8 @@ function normalizeSheet(sheet) {
     rank: sheet.rank || "",
     movement: numberOr(sheet.movement, 9),
     peRound: numberOr(sheet.peRound, 1),
+    loadLimit: numberOr(sheet.loadLimit, Math.max(1, Number(sheet.str || 1) * 5)),
+    currentLoad: numberOr(sheet.currentLoad, 0),
     hp: numberOr(sheet.hp, 16),
     hpMax: numberOr(sheet.hpMax, sheet.hp || 16),
     pe: numberOr(sheet.pe, 2),
@@ -3800,6 +4085,7 @@ function normalizeSheet(sheet) {
     abilities: sheet.abilities || "",
     rituals: sheet.rituals || "",
     inventory: sheet.inventory || "",
+    itemImages: sheet.itemImages || {},
     notes: sheet.notes || "",
     appearance: sheet.appearance || "",
     personality: sheet.personality || "",
@@ -3907,9 +4193,12 @@ function performRoll(formula) {
   try {
     const result = rollFormula(formula);
     switchTab("mesa");
-    playDiceSound();
+    playDiceSound(result);
     animateDiceRoll(result);
     window.setTimeout(() => {
+      els.rollResult.classList.remove("roll-result-pulse", "roll-critical", "roll-fumble", "roll-cancelled");
+      void els.rollResult.offsetWidth;
+      els.rollResult.classList.add("roll-result-pulse", rollSpecialClass(result) || "roll-normal");
       els.rollResult.textContent = result.rollMode === "d20-test" ? `Resultado final: ${result.finalTotal}` : result.displayTotal;
     }, 460);
     state.rolls.unshift({ ...result, id: crypto.randomUUID(), at: new Date().toLocaleTimeString("pt-BR") });
@@ -3921,7 +4210,10 @@ function performRoll(formula) {
   }
 }
 
-function playDiceSound() {
+function playDiceSound(result = null) {
+  const audio = new Audio("./assets/dice-roll.mp3");
+  audio.volume = 0.58;
+  audio.play().catch(() => {});
   const AudioContext = window.AudioContext || window.webkitAudioContext;
   if (!AudioContext) return;
   const context = new AudioContext();
@@ -3929,9 +4221,17 @@ function playDiceSound() {
   const gain = context.createGain();
   gain.gain.setValueAtTime(0.0001, now);
   gain.gain.exponentialRampToValueAtTime(0.09, now + 0.02);
-  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.42);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.62);
   gain.connect(context.destination);
-  [120, 170, 95, 210].forEach((frequency, index) => {
+  const special = rollSpecialClass(result);
+  const frequencies = special === "roll-critical"
+    ? [220, 330, 440, 660]
+    : special === "roll-fumble"
+      ? [150, 90, 70, 48]
+      : special === "roll-cancelled"
+        ? [240, 180, 240, 120]
+        : [120, 170, 95, 210];
+  frequencies.forEach((frequency, index) => {
     const osc = context.createOscillator();
     osc.type = "square";
     osc.frequency.setValueAtTime(frequency, now + index * 0.045);
@@ -3939,10 +4239,12 @@ function playDiceSound() {
     osc.start(now + index * 0.045);
     osc.stop(now + 0.1 + index * 0.06);
   });
-  window.setTimeout(() => context.close(), 650);
+  window.setTimeout(() => context.close(), 820);
 }
 
 function animateDiceRoll(result) {
+  if (!els.diceStage) return;
+  window.clearTimeout(diceClearTimer);
   els.diceStage.innerHTML = "";
   els.diceStage.className = `dice-stage ${rollSpecialClass(result)}`;
   const stageRect = els.diceStage.getBoundingClientRect();
@@ -3985,6 +4287,10 @@ function animateDiceRoll(result) {
   const headline = specialLabel || (result.rollMode === "d20-test" ? `Resultado ${result.displayTotal}` : result.rollMode === "rps" ? result.displayTotal : "Resultados");
   total.innerHTML = `<strong>${escapeHtml(headline)}</strong><span>${escapeHtml(result.formula)} | ${escapeHtml(result.detail)}</span>`;
   els.diceStage.append(total);
+  diceClearTimer = window.setTimeout(() => {
+    els.diceStage.innerHTML = "";
+    els.diceStage.className = "dice-stage";
+  }, 5000);
 }
 
 function rollSpecialClass(result) {
@@ -4022,13 +4328,26 @@ function playRps() {
   const b = choices[Math.floor(Math.random() * choices.length)];
   const winner = a === b ? "empate" : (a === "PEDRA" && b === "TESOURA") || (a === "TESOURA" && b === "PAPEL") || (a === "PAPEL" && b === "PEDRA") ? "lado esquerdo vence" : "lado direito vence";
   switchTab("mesa");
-  els.diceStage.innerHTML = `
-    <div class="rps-duel">
-      <div><span>Investigador</span><b>${a}</b></div>
-      <strong>${winner}</strong>
-      <div><span>Oponente</span><b>${b}</b></div>
-    </div>
-  `;
+  if (els.diceStage) {
+    window.clearTimeout(diceClearTimer);
+    els.diceStage.innerHTML = `
+      <div class="rps-duel">
+        <div><span>Investigador</span><b>${a}</b></div>
+        <strong>${winner}</strong>
+        <div><span>Oponente</span><b>${b}</b></div>
+      </div>
+    `;
+    diceClearTimer = window.setTimeout(() => {
+      els.diceStage.innerHTML = "";
+      els.diceStage.className = "dice-stage";
+    }, 5000);
+  }
+  if (els.rollResult) {
+    els.rollResult.classList.remove("roll-result-pulse", "roll-critical", "roll-fumble", "roll-cancelled");
+    void els.rollResult.offsetWidth;
+    els.rollResult.classList.add("roll-result-pulse");
+    els.rollResult.textContent = winner;
+  }
   playDiceSound();
   state.rolls.unshift({
     id: crypto.randomUUID(),
@@ -4093,6 +4412,9 @@ function showApp(mode = state.currentMode || "player") {
   document.querySelector("#portalScreen")?.classList.add("hidden");
   document.querySelector("#appShell")?.classList.remove("hidden");
   document.body.classList.toggle("sheet-area", mode === "sheet");
+  document.body.classList.toggle("master-view", mode === "master");
+  document.body.classList.toggle("player-view", mode === "player" || mode === "sheet");
+  if (mode !== "master" && state.activeTab === "biblioteca") state.activeTab = "mesa";
   if (mode === "sheet") state.activeTab = ["fichas", "inventario", "anotacoes"].includes(state.activeTab) ? state.activeTab : "fichas";
   renderAll();
   switchTab(state.activeTab || "mesa");
@@ -4461,9 +4783,8 @@ els.battlefield.addEventListener("drop", (event) => {
   const y = clamp(Math.floor((event.clientY - rect.top + els.battlefield.parentElement.scrollTop) / cellSize), 0, state.map.rows - 1);
   const token = state.tokens.find((item) => item.id === event.dataTransfer.getData("text/plain"));
   if (canControlToken(token)) {
-    token.x = x;
-    token.y = y;
-    renderAll();
+    state.selectedToken = token.id;
+    moveSelectedToken(x, y);
   }
 });
 document.querySelector(".battlefield-wrap")?.addEventListener("mousedown", startMapPan);
@@ -4479,8 +4800,8 @@ window.addEventListener("keyup", (event) => {
   }
 });
 
-document.querySelector("#resizeGrid").addEventListener("click", resizeGrid);
-document.querySelector("#addToken").addEventListener("click", addToken);
+document.querySelector("#resizeGrid")?.addEventListener("click", resizeGrid);
+document.querySelector("#addToken")?.addEventListener("click", addToken);
 document.querySelector("#quickResizeGrid")?.addEventListener("click", () => {
   if (!isMasterMode()) return;
   state.map.cols = clamp(Number(els.quickGridCols?.value || state.map.cols), 6, 100);
@@ -4493,8 +4814,8 @@ document.querySelector("#quickResizeGrid")?.addEventListener("click", () => {
   state.map.thickEvery = clamp(Number(els.quickThickEvery?.value ?? state.map.thickEvery), 0, 20);
   state.map.snap = els.quickSnap?.checked !== false;
   state.map.coordinates = els.quickCoordinates?.checked === true;
-  els.gridCols.value = state.map.cols;
-  els.gridRows.value = state.map.rows;
+  if (els.gridCols) els.gridCols.value = state.map.cols;
+  if (els.gridRows) els.gridRows.value = state.map.rows;
   state.tokens.forEach((token) => {
     token.x = Math.min(token.x, state.map.cols - 1);
     token.y = Math.min(token.y, state.map.rows - 1);
@@ -4513,6 +4834,11 @@ document.querySelector("#quickResizeGrid")?.addEventListener("click", () => {
 });
 document.querySelector("#quickAddToken")?.addEventListener("click", () => {
   if (isMasterMode()) addToken("quick");
+});
+els.quickTokenScale?.addEventListener("input", () => {
+  if (!isMasterMode()) return;
+  state.map = normalizeMap({ ...state.map, tokenScale: Number(els.quickTokenScale.value) });
+  renderAll();
 });
 document.querySelector("#quickAddNpc")?.addEventListener("click", () => {
   if (isMasterMode()) addNpcToken();
@@ -4623,29 +4949,29 @@ document.querySelector("#lockMapImage")?.addEventListener("click", () => {
     if (isMasterMode()) updateMapBackground(field, Number(input.value));
   });
 });
-document.querySelector("#clearMap").addEventListener("click", () => {
+document.querySelector("#clearMap")?.addEventListener("click", () => {
   if (!isMasterMode()) return;
   state.tokens = [];
   renderAll();
 });
-els.lightsOn.addEventListener("change", () => {
+els.lightsOn?.addEventListener("change", () => {
   state.map.lightsOn = els.lightsOn.checked;
   renderAll();
 });
-els.darkness.addEventListener("input", () => {
+els.darkness?.addEventListener("input", () => {
   state.map.darkness = Number(els.darkness.value);
   renderAll();
 });
 els.quickLightsOn?.addEventListener("change", () => {
   if (!isMasterMode()) return;
   state.map.lightsOn = els.quickLightsOn.checked;
-  els.lightsOn.checked = state.map.lightsOn;
+  if (els.lightsOn) els.lightsOn.checked = state.map.lightsOn;
   renderAll();
 });
 els.quickDarkness?.addEventListener("input", () => {
   if (!isMasterMode()) return;
   state.map.darkness = Number(els.quickDarkness.value);
-  els.darkness.value = state.map.darkness;
+  if (els.darkness) els.darkness.value = state.map.darkness;
   renderAll();
 });
 document.querySelectorAll(".map-quick-tools details").forEach((details) => {
@@ -4670,7 +4996,7 @@ document.querySelector("#quickRoll").addEventListener("click", () => performRoll
 document.querySelector("#rpsButton")?.addEventListener("click", playRps);
 document.querySelector("#clearRollLog")?.addEventListener("click", () => {
   state.rolls = [];
-  els.diceStage.innerHTML = "";
+  if (els.diceStage) els.diceStage.innerHTML = "";
   renderRollLog();
   save();
 });
@@ -4683,6 +5009,7 @@ document.querySelectorAll("[data-roll]").forEach((button) => {
 
 async function bootApp() {
   load();
+  if (state.activeTab === "configuracoes") state.activeTab = "mesa";
   if (!document.getElementById(state.activeTab)) state.activeTab = "mesa";
   const client = supabaseClient();
   if (client) {

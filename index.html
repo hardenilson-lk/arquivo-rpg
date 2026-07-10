@@ -160,7 +160,6 @@
           <button class="tab menu-button" data-tab="anotacoes" type="button"><span>✎</span>Anotacoes</button>
           <button class="tab menu-button" data-tab="missoes" type="button"><span>◎</span>Missoes</button>
           <button class="tab menu-button" data-tab="biblioteca" type="button"><span>⌘</span>Arquivos</button>
-          <button class="tab menu-button" data-tab="configuracoes" type="button"><span>⚙</span>Configuracoes</button>
           <button id="backPortal" class="menu-button" type="button"><span>↩</span>Portal</button>
           <button id="refreshCampaignButton" class="menu-button master-only refresh-campaign-button" type="button"><span>↻</span>Atualizar campanha</button>
           <button id="saveFileButton" class="menu-button save-file-button" type="button"><span>✓</span>Salvar arquivo</button>
@@ -173,56 +172,6 @@
           <span id="archiveLocation">Camara central</span>
         </section>
 
-        <section class="panel-section file-controls master-only">
-          <h2>Mapa</h2>
-          <label>
-            Nome
-            <input id="mapName" type="text" maxlength="34" />
-          </label>
-          <div class="two-cols">
-            <label>
-              Largura
-              <input id="gridCols" type="number" min="6" max="100" />
-            </label>
-            <label>
-              Altura
-              <input id="gridRows" type="number" min="6" max="100" />
-            </label>
-          </div>
-          <button id="resizeGrid" class="primary" type="button">Aplicar grid</button>
-        </section>
-
-        <section class="panel-section file-controls master-only">
-          <h2>Tokens</h2>
-          <label>
-            Nome
-            <input id="tokenName" type="text" maxlength="24" placeholder="Agente, criatura, NPC..." />
-          </label>
-          <div class="token-tools">
-            <label>
-              Cor
-              <input id="tokenColor" type="color" value="#c83b2f" />
-            </label>
-            <label>
-              Luz
-              <input id="tokenLight" type="range" min="0" max="6" value="3" />
-            </label>
-          </div>
-          <button id="addToken" class="primary" type="button">Adicionar token</button>
-        </section>
-
-        <section class="panel-section file-controls">
-          <h2>Ambiente</h2>
-          <label class="check-row">
-            <input id="lightsOn" type="checkbox" checked />
-            Iluminacao ativa
-          </label>
-          <label>
-            Escuridao
-            <input id="darkness" type="range" min="0" max="90" value="58" />
-          </label>
-          <button id="clearMap" class="ghost master-only" type="button">Limpar tokens</button>
-        </section>
       </aside>
 
       <section class="workspace archive-workspace">
@@ -232,12 +181,6 @@
           <div>
             <p class="eyebrow">Campanha local</p>
             <h2 id="viewTitle">Mapa de combate</h2>
-          </div>
-          <div class="quick-roll dice-paper">
-            <label for="quickFormula">Rolagem</label>
-            <input id="quickFormula" type="text" value="1d20+3" aria-label="Formula de dado rapida" />
-            <button id="quickRoll" type="button">Rolar dado</button>
-            <button id="rpsButton" type="button">Disputa</button>
           </div>
         </header>
 
@@ -319,7 +262,17 @@
                   <input id="quickTokenColor" type="color" value="#c83b2f" aria-label="Cor do token" />
                   <label>Luz <input id="quickTokenLight" type="number" min="0" max="10" value="3" /></label>
                 </div>
+                <label>Tamanho <input id="quickTokenScale" type="range" min="70" max="145" value="100" /></label>
                 <button id="quickAddToken" type="button">Adicionar</button>
+              </details>
+              <details class="dice-drawer">
+                <summary>Dados</summary>
+                <div class="quick-roll dice-paper">
+                  <label for="quickFormula">Rolagem</label>
+                  <input id="quickFormula" type="text" value="1d20+3" aria-label="Formula de dado rapida" />
+                  <button id="quickRoll" type="button">Rolar dado</button>
+                  <button id="rpsButton" type="button">Disputa</button>
+                </div>
               </details>
               <details>
                 <summary>NPC</summary>
@@ -328,7 +281,12 @@
                   <input id="npcColor" type="color" value="#7b241c" aria-label="Cor do NPC" />
                   <label>PV <input id="npcHp" type="number" min="1" max="999" value="20" /></label>
                 </div>
+                <div class="quick-token-row npc-stat-row">
+                  <label>Def <input id="npcDefense" type="number" min="0" max="99" value="10" /></label>
+                  <label>Luz <input id="npcLight" type="number" min="0" max="10" value="0" /></label>
+                </div>
                 <label>Tipo <input id="npcType" type="text" maxlength="28" placeholder="Criatura, culto, civil..." /></label>
+                <label>Ataque <input id="npcAttack" type="text" maxlength="60" placeholder="Garras 1d20 | 2d6 | curto..." /></label>
                 <label>Imagem <input id="npcImage" type="file" accept="image/*" /></label>
                 <label class="check-row"><input id="npcHidden" type="checkbox" /> Invisivel para jogadores</label>
                 <button id="quickAddNpc" type="button">Criar NPC</button>
@@ -343,13 +301,18 @@
               <button id="resetGridZoom" type="button" class="mini-tab" title="Zoom 100%">100%</button>
               <button id="zoomInGrid" type="button" class="mini-tab" title="Aumentar zoom">+</button>
               <button id="centerTokenView" type="button" class="mini-tab" title="Centralizar token">Alvo</button>
-              <button type="button" data-tab="configuracoes" class="tab mini-tab">Grid</button>
-              <button type="button" data-tab="configuracoes" class="tab mini-tab">Luz</button>
               <button id="fitGridToView" type="button" class="mini-tab">Ajustar tela</button>
               <button id="gridAssistantButton" type="button" class="mini-tab">Guia</button>
             </div>
             <div id="mapAssistantPanel" class="map-assistant-panel hidden"></div>
           </div>
+
+          <section class="master-shield paper-panel master-only">
+            <h2>Escudo do mestre</h2>
+            <div id="masterShield" class="master-shield-list"></div>
+            <h3>NPCs no arquivo</h3>
+            <div id="npcMiniCards" class="npc-mini-cards"></div>
+          </section>
 
           <aside class="right-stack">
             <section class="crt-monitor dark-panel">
@@ -361,9 +324,13 @@
               </div>
             </section>
 
-            <section class="token-board paper-panel">
-              <h2>Tokens no mapa</h2>
-              <div id="tokenList" class="token-list" aria-live="polite"></div>
+            <section class="note-paper clues-panel">
+              <h2>Pistas reveladas</h2>
+              <ul id="noteList">
+                <li>Simbolo central reage a presenca do artefato.</li>
+                <li>Luz fraca nas tochas.</li>
+                <li>Possivel passagem secreta na parede norte.</li>
+              </ul>
             </section>
 
             <section class="paper-panel map-chat-panel">
@@ -379,21 +346,7 @@
               <h2>Sua ficha</h2>
               <div id="characterCards" class="character-cards"></div>
             </section>
-
-            <section class="master-shield paper-panel master-only">
-              <h2>Escudo do mestre</h2>
-              <div id="masterShield" class="master-shield-list"></div>
-            </section>
           </aside>
-
-          <section class="note-paper clues-panel">
-            <h2>Pistas reveladas</h2>
-            <ul id="noteList">
-              <li>Simbolo central reage a presenca do artefato.</li>
-              <li>Luz fraca nas tochas.</li>
-              <li>Possivel passagem secreta na parede norte.</li>
-            </ul>
-          </section>
 
           <section class="history-panel paper-panel">
             <div class="history-head">
