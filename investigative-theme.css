@@ -140,6 +140,48 @@ body {
   gap: 18px;
 }
 
+.password-line {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.password-line button {
+  min-height: 42px;
+  padding: 0 12px;
+  font-size: .82rem;
+}
+
+.login-secondary-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.login-secondary-actions button {
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: .82rem;
+}
+
+.server-status {
+  border: 1px solid rgba(49, 83, 33, .45);
+  padding: 9px 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+  color: #1f6a21;
+  background: rgba(87, 122, 42, .12);
+}
+
+.server-status.offline {
+  border-color: rgba(135, 31, 31, .45);
+  color: var(--stamp-red);
+  background: rgba(135, 31, 31, .1);
+}
+
 .login-error {
   min-height: 24px;
   color: var(--stamp-red);
@@ -1718,7 +1760,7 @@ label {
 }
 
 .player-view .map-tools {
-  display: none;
+  display: flex;
 }
 
 .right-stack {

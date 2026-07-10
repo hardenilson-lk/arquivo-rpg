@@ -20,12 +20,16 @@
         <p>Sistema de Investigacao e Registro de Campanhas</p>
         <h2>Acesso ao sistema</h2>
         <label>Nome de usuario <input id="loginUser" type="text" autocomplete="username" placeholder="Digite seu usuario" /></label>
-        <label>Senha <input id="loginPassword" type="password" autocomplete="current-password" placeholder="Digite sua senha" /></label>
+        <label>Senha <span class="password-line"><input id="loginPassword" type="password" autocomplete="current-password" placeholder="Digite sua senha" /><button id="toggleLoginPassword" type="button">Mostrar</button></span></label>
         <label class="check-row"><input id="rememberAccess" type="checkbox" /> Lembrar acesso</label>
         <button id="loginSubmit" class="login-enter" type="submit">Entrar <span>-></span></button>
         <div class="login-actions">
           <button id="createAccess" type="button">Criar acesso</button>
           <button id="inviteAccess" type="button">Entrar com convite</button>
+        </div>
+        <div class="login-secondary-actions">
+          <button id="recoverPassword" type="button">Recuperar senha</button>
+          <span id="serverStatusBadge" class="server-status offline">Servidor: verificando...</span>
         </div>
         <p class="login-error" id="loginError" aria-live="polite"></p>
         <small>"A verdade esta nos registros. O resto e interpretacao."</small>
@@ -192,8 +196,8 @@
               <span>MAPA</span>
               <strong id="mapTitleLabel">Base da equipe</strong>
             </div>
-            <div class="map-quick-tools master-only">
-              <details>
+            <div class="map-quick-tools">
+              <details class="master-only">
                 <summary>Grid</summary>
                 <label>Colunas <input id="quickGridCols" type="number" min="6" max="100" /></label>
                 <label>Linhas <input id="quickGridRows" type="number" min="6" max="100" /></label>
@@ -207,7 +211,7 @@
                 <label class="check-row"><input id="quickCoordinates" type="checkbox" /> Coordenadas</label>
                 <button id="quickResizeGrid" type="button">Aplicar</button>
               </details>
-              <details>
+              <details class="master-only">
                 <summary>Fundo</summary>
                 <input id="mapImageInput" type="file" accept="image/*" />
                 <div class="map-bg-actions">
@@ -223,12 +227,12 @@
                 <label>Rotacao <input id="mapImageRotation" type="range" min="-180" max="180" /></label>
                 <label>Opacidade <input id="mapImageOpacity" type="range" min="0" max="100" /></label>
               </details>
-              <details>
+              <details class="master-only">
                 <summary>Luz</summary>
                 <label class="check-row"><input id="quickLightsOn" type="checkbox" /> Ativa</label>
                 <label>Escuridao <input id="quickDarkness" type="range" min="0" max="90" /></label>
               </details>
-              <details>
+              <details class="master-only">
                 <summary>Ferramentas</summary>
                 <label>Acao
                   <select id="mapTool">
@@ -255,7 +259,7 @@
                 <button id="mapHelpButton" type="button">?</button>
                 <button id="mapChecklistButton" type="button">Checklist</button>
               </details>
-              <details>
+              <details class="master-only">
                 <summary>Token</summary>
                 <input id="quickTokenName" type="text" maxlength="24" placeholder="Nome do token" />
                 <div class="quick-token-row">
@@ -274,7 +278,7 @@
                   <button id="rpsButton" type="button">Disputa</button>
                 </div>
               </details>
-              <details>
+              <details class="master-only">
                 <summary>NPC</summary>
                 <input id="npcName" type="text" maxlength="24" placeholder="Nome do NPC" />
                 <div class="quick-token-row">
