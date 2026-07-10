@@ -1027,16 +1027,45 @@ async function findCampaignByInviteOnline(code) {
   const clean = normalizeInviteCode(code);
   if (!client || !clean) return null;
   setSyncStatus(`Buscando convite ${clean} no Supabase...`);
+
   const { data, error } = await client
     .from("campanhas")
     .select("*")
     .or(`codigo_convite.eq.${clean},invite_code.eq.${clean}`)
     .limit(1);
   if (error) {
-    setSyncStatus(`Nao consegui buscar convite online: ${remoteErrorMessage(error)}`, true);
-    return null;
+    console.warn("[Supabase] Busca OR de convite falhou, tentando buscas separadas.", error);
+  } else if (data?.[0]) {
+    return normalizeCampaignRecord({ ...(data[0].payload || {}), ...data[0] });
   }
-  const row = data?.[0];
+
+  const attempts = [
+    ["codigo_convite", clean],
+    ["invite_code", clean],
+    ["codigo_convite", code.trim()],
+    ["invite_code", code.trim()]
+  ];
+  for (const [column, value] of attempts) {
+    const { data: rows, error: lookupError } = await client
+      .from("campanhas")
+      .select("*")
+      .eq(column, value)
+      .limit(1);
+    if (lookupError) {
+      console.warn(`[Supabase] Convite por ${column} falhou.`, lookupError);
+      continue;
+    }
+    if (rows?.[0]) return normalizeCampaignRecord({ ...(rows[0].payload || {}), ...rows[0] });
+  }
+
+  const { data: allRows, error: allError } = await client.from("campanhas").select("*");
+  if (!allError && Array.isArray(allRows)) {
+    const payloadMatch = allRows.find((row) => campaignMatchesInvite({ ...(row.payload || {}), ...row }, clean));
+    if (payloadMatch) return normalizeCampaignRecord({ ...(payloadMatch.payload || {}), ...payloadMatch });
+  }
+
+  setSyncStatus(`Convite ${clean} nao encontrado no Supabase.`, true);
+  const row = null;
   return row ? normalizeCampaignRecord({ ...(row.payload || {}), ...row }) : null;
 }
 
@@ -1104,6 +1133,25 @@ async function refreshActiveCampaignFromSupabase({ rerender = false } = {}) {
     name: row.payload?.name || row.nome || row.name || "Agente",
     player: row.payload?.player || userMap[row.user_id]?.username || row.nome || "Jogador"
   }));
+
+  const linkedIds = linkedSheets.map((sheet) => sheet.id).filter(Boolean);
+  if (linkedIds.length) {
+    const { data: inventoryRows, error: inventoryError } = await client
+      .from("inventario")
+      .select("*")
+      .in("personagem_id", linkedIds);
+    if (inventoryError) {
+      console.warn("[Supabase] Nao consegui carregar inventarios vinculados.", inventoryError);
+    } else {
+      linkedSheets.forEach((sheet) => {
+        const rows = (inventoryRows || []).filter((row) => row.personagem_id === sheet.id);
+        const fullText = rows.find((row) => row.payload?.inventoryText)?.payload?.inventoryText;
+        if (fullText) sheet.inventory = fullText;
+        else if (rows.length) sheet.inventory = rows.map((row) => row.nome).filter(Boolean).join("\n");
+      });
+    }
+  }
+
   state.sheets = mergeById(state.sheets, linkedSheets).map(normalizeSheet);
   campaign.personagens = linkedSheets.map((sheet) => sheet.id);
   campaign.jogadores = mergeUnique([...(campaign.jogadores || []), ...userIds]);
@@ -1140,7 +1188,7 @@ async function joinCampaignWithInvite(code) {
 }
 
 function linkActiveSheetToCampaign(campaign) {
-  const sheet = activeUserSheet();
+  const sheet = activeUserSheet() || createSheetForCurrentUser(`${currentUser()?.username || "Novo"} agente`);
   if (!campaign) throw new Error("Campanha nao encontrada.");
   if (!sheet?.id) throw new Error("Crie ou selecione uma ficha antes de vincular.");
   addActiveSheetToCampaign(campaign);
@@ -2883,6 +2931,7 @@ function renderInventoryView() {
     </div>
     ${items.length ? `<div class="inventory-list detailed">${items.map((item, index) => inventoryItemCard(item, index, sheet)).join("")}</div>` : `<p>Nenhum equipamento cadastrado na ficha.</p>`}
     <div class="inventory-actions">
+      ${isMasterMode() ? `<button type="button" data-refresh-inventory-campaign>Atualizar fichas da campanha</button>` : ""}
       <button type="button" data-tab="fichas">Abrir ficha</button>
       <button type="button" data-inventory-add>Adicionar pelo catalogo</button>
       <button type="button" data-save-file>Salvar arquivo</button>
@@ -2910,6 +2959,16 @@ function renderInventoryView() {
     field.addEventListener("change", () => updateInventoryImage(Number(field.dataset.inventoryImage), field.files?.[0]));
   });
   container.querySelector("[data-inventory-add]")?.addEventListener("click", () => openCatalog("inventory"));
+  container.querySelector("[data-refresh-inventory-campaign]")?.addEventListener("click", async () => {
+    try {
+      await refreshActiveCampaignFromSupabase({ rerender: false });
+      renderInventoryView();
+      setSyncStatus("Inventarios vinculados atualizados.");
+    } catch (error) {
+      setSyncStatus(`Nao consegui atualizar inventarios: ${error.message}`, true);
+      window.alert(error.message);
+    }
+  });
   container.querySelector("[data-tab]")?.addEventListener("click", () => switchTab("fichas"));
   container.querySelector("[data-save-file]")?.addEventListener("click", saveCurrentFile);
 }
@@ -3604,8 +3663,11 @@ function attrValueForSkill(sheet, attr) {
 function ensureActiveSheet() {
   const user = currentUser();
   const ownedIds = user?.sheetIds || [];
+  const campaign = currentCampaign();
+  const linkedIds = campaign?.personagens || [];
   let index = state.sheets.findIndex((sheet) => sheet.id === state.activeSheetId);
-  if (ownedIds.length && (index < 0 || !ownedIds.includes(state.sheets[index].id))) {
+  const canUseLinkedSheet = isMasterMode() && index >= 0 && linkedIds.includes(state.sheets[index].id);
+  if (!canUseLinkedSheet && ownedIds.length && (index < 0 || !ownedIds.includes(state.sheets[index].id))) {
     index = state.sheets.findIndex((sheet) => sheet.id === ownedIds[0]);
   }
   if (index < 0) index = 0;
