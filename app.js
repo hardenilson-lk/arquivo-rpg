@@ -398,15 +398,15 @@ function safeSetLocalStorage(key, value) {
 function lightLocalState() {
   const user = currentUser();
   return {
-    user_id: state.currentUserId || "",
+    user_id: uuidOrNull(state.currentUserId) || "",
     username: user?.username || "",
     email: user?.email || "",
-    role: user?.role || "player",
+    role: normalizeRole(user?.role || "player"),
     sheet_ids: user?.sheetIds || [],
     campaign_ids: user?.campaignIds || [],
-    active_campaign_id: state.activeCampaignId || "",
-    active_character_id: state.activeSheetId || "",
-    active_session_id: state.activeSessionId || "",
+    active_campaign_id: uuidOrNull(state.activeCampaignId) || "",
+    active_character_id: uuidOrNull(state.activeSheetId) || "",
+    active_session_id: uuidOrNull(state.activeSessionId) || state.activeSessionId || "",
     active_tab: state.activeTab || "mesa",
     current_mode: state.currentMode || "player",
     saved_at: new Date().toISOString()
@@ -419,18 +419,18 @@ function saveLightSession() {
 
 function applyLightSession(session) {
   if (!session || typeof session !== "object") return;
-  state.currentUserId = session.user_id || state.currentUserId;
-  state.activeCampaignId = session.active_campaign_id || state.activeCampaignId;
-  state.activeSheetId = session.active_character_id || state.activeSheetId;
+  state.currentUserId = uuidOrNull(session.user_id) || state.currentUserId;
+  state.activeCampaignId = uuidOrNull(session.active_campaign_id) || state.activeCampaignId;
+  state.activeSheetId = uuidOrNull(session.active_character_id) || state.activeSheetId;
   state.activeSessionId = session.active_session_id || state.activeSessionId;
   state.activeTab = session.active_tab || state.activeTab;
   state.currentMode = session.current_mode || state.currentMode;
-  if (session.user_id && !state.accounts.some((account) => account.id === session.user_id)) {
+  if (uuidOrNull(session.user_id) && !state.accounts.some((account) => account.id === session.user_id)) {
     state.accounts.push({
       id: session.user_id,
       username: session.username || "agente",
       email: session.email || "",
-      role: session.role || "player",
+      role: normalizeRole(session.role || "player"),
       sheetIds: session.sheet_ids || [],
       campaignIds: session.campaign_ids || [],
       online: true
@@ -703,6 +703,26 @@ function mergeUnique(values = []) {
   return Array.from(new Set(values.filter(Boolean)));
 }
 
+function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
+}
+
+function uuidOrNull(value) {
+  return isUuid(value) ? String(value) : null;
+}
+
+function normalizeRole(value) {
+  const role = normalizeKey(value);
+  if (role === "admin-master" || role === "adm" || role === "admin") return "admin";
+  if (role === "mestre") return "master";
+  if (role === "jogador") return "player";
+  return role || "player";
+}
+
+function isOnlineUser(user) {
+  return Boolean(user && isUuid(user.id));
+}
+
 async function hashPassword(password) {
   const text = String(password || "");
   if (!text) return "";
@@ -721,7 +741,7 @@ function userFromRow(row) {
     id: row.id || payload.id || crypto.randomUUID(),
     username: row.username || payload.username || row.email?.split("@")[0] || "agente",
     email: row.email || payload.email || "",
-    role: row.role || payload.role || "player",
+    role: normalizeRole(row.role || payload.role || "player"),
     sheetIds: row.sheet_ids || payload.sheetIds || payload.sheet_ids || [],
     campaignIds: row.campaign_ids || payload.campaignIds || payload.campaign_ids || [],
     passwordHash: row.password_hash || payload.password_hash || payload.passwordHash || "",
@@ -740,7 +760,7 @@ function upsertLocalAccount(account) {
     username: account.username || account.email || "agente",
     email: account.email || "",
     password: account.password || "",
-    role: account.role || "player",
+    role: normalizeRole(account.role || "player"),
     sheetIds: Array.isArray(account.sheetIds) ? account.sheetIds : [],
     campaignIds: Array.isArray(account.campaignIds) ? account.campaignIds : [],
     passwordHash: account.passwordHash || account.password_hash || "",
@@ -853,6 +873,10 @@ async function loginAccountOnline(username, password) {
   );
   if (!userRow) throw new Error("Usuario nao encontrado no Supabase.");
   const accountData = userFromRow(userRow);
+  if (!isUuid(accountData.id)) {
+    console.error("[Supabase] Erro Supabase", { table: "usuarios", motivo: "usuario.id nao e UUID", userRow, accountData });
+    throw new Error("Usuario encontrado, mas o id salvo no Supabase nao e UUID valido.");
+  }
   const passwordHash = await hashPassword(password);
   if (accountData.passwordHash && accountData.passwordHash !== passwordHash) throw new Error("Senha incorreta.");
   if (!accountData.passwordHash) {
@@ -862,6 +886,8 @@ async function loginAccountOnline(username, password) {
   const account = upsertLocalAccount(accountData);
   state.currentUserId = account.id;
   console.log("[Supabase] Usuario carregado do Supabase", account);
+  console.log("[Supabase] currentUser.id", account.id);
+  console.log("[Supabase] currentUser.role", normalizeRole(account.role));
   await migrateLocalWorkspaceToSupabase(account);
   await loadOnlineWorkspace();
   setSyncStatus("Dados online carregados.");
@@ -870,13 +896,13 @@ async function loginAccountOnline(username, password) {
 
 async function saveOnlineUser(user = currentUser()) {
   const client = supabaseClient();
-  if (!client || !user || user.id === "admin-master") return;
+  if (!client || !isOnlineUser(user)) return;
   const now = new Date().toISOString();
   const payload = {
     id: user.id,
     username: user.username,
     email: user.email,
-    role: user.role || "player",
+    role: normalizeRole(user.role || "player"),
     sheet_ids: user.sheetIds || [],
     campaign_ids: user.campaignIds || [],
     password_hash: user.passwordHash || user.password_hash || "",
@@ -903,21 +929,57 @@ async function saveOnlineUser(user = currentUser()) {
 async function loadOnlineWorkspace() {
   const client = supabaseClient();
   const user = currentUser();
-  if (!client || !user || user.id === "admin-master") return;
+  if (!client || !isOnlineUser(user)) return;
   onlineLoadRunning = true;
   try {
+    console.log("[Supabase] Usuario encontrado no Supabase", { id: user.id, username: user.username, role: normalizeRole(user.role) });
+    console.log("[Supabase] currentUser.id", user.id);
+    console.log("[Supabase] currentUser.role", normalizeRole(user.role));
+    console.log("[Supabase] Carregando campanhas para user_id", user.id);
     setSyncStatus("Carregando arquivos online...");
-    const [campaignRows, sheetRows, inventoryRows, noteRows, rollRows] = await Promise.all([
-      safeSelect("campanhas"),
-      safeSelect("personagens"),
-      safeSelect("inventario"),
-      safeSelect("anotacoes"),
-      safeSelect("rolagens")
+    const [
+      ownedCampaignResult,
+      sheetResult,
+      inventoryResult,
+      noteResult,
+      rollResult
+    ] = await Promise.all([
+      client.from("campanhas").select("*").or(`owner_id.eq.${user.id},mestre_id.eq.${user.id}`),
+      client.from("personagens").select("*").eq("user_id", user.id),
+      client.from("inventario").select("*").eq("user_id", user.id),
+      client.from("anotacoes").select("*").eq("user_id", user.id),
+      client.from("rolagens").select("*").eq("user_id", user.id)
     ]);
+
+    [
+      ["campanhas", ownedCampaignResult],
+      ["personagens", sheetResult],
+      ["inventario", inventoryResult],
+      ["anotacoes", noteResult],
+      ["rolagens", rollResult]
+    ].forEach(([table, result]) => {
+      if (result.error) console.error("[Supabase] Erro Supabase", { table, user_id: user.id, error: result.error });
+    });
+
+    if (ownedCampaignResult.error) throw new Error(`campanhas: ${remoteErrorMessage(ownedCampaignResult.error)}`);
+    if (sheetResult.error) throw new Error(`personagens: ${remoteErrorMessage(sheetResult.error)}`);
+
+    const sheetRows = Array.isArray(sheetResult.data) ? sheetResult.data : [];
+    const linkedCampaignIds = mergeUnique(sheetRows.map((row) => uuidOrNull(row.campanha_id)));
+    let linkedCampaignRows = [];
+    if (linkedCampaignIds.length) {
+      const { data, error } = await client.from("campanhas").select("*").in("id", linkedCampaignIds);
+      if (error) console.error("[Supabase] Erro Supabase", { table: "campanhas", linkedCampaignIds, error });
+      else linkedCampaignRows = Array.isArray(data) ? data : [];
+    }
+    const campaignRows = mergeById(ownedCampaignResult.data || [], linkedCampaignRows);
+    const inventoryRows = Array.isArray(inventoryResult.data) ? inventoryResult.data : [];
+    const noteRows = Array.isArray(noteResult.data) ? noteResult.data : [];
+    const rollRows = Array.isArray(rollResult.data) ? rollResult.data : [];
 
     const remoteCampaigns = campaignRows
       .map((row) => normalizeCampaignRecord({ ...(row.payload || {}), ...row, id: row.id }))
-      .filter((campaign) => campaign.mestreId === user.id || campaign.jogadores.includes(user.id) || (user.campaignIds || []).includes(campaign.id) || user.role === "admin");
+      .filter((campaign) => campaign.mestreId === user.id || campaign.jogadores.includes(user.id) || linkedCampaignIds.includes(campaign.id));
     const remoteSheets = sheetRows
       .map((row) => normalizeSheet({
         ...(row.payload || {}),
@@ -933,7 +995,7 @@ async function loadOnlineWorkspace() {
     const onlineSheetIds = sheetRows.filter((row) => row.user_id === user.id).map((row) => row.id).filter(Boolean);
     user.sheetIds = mergeUnique([...(user.sheetIds || []), ...onlineSheetIds, ...remoteSheets.map((sheet) => sheet.id)]);
     const onlineCampaignIds = campaignRows
-      .filter((row) => row.owner_id === user.id || row.mestre_id === user.id || row.payload?.mestreId === user.id || row.payload?.jogadores?.includes(user.id))
+      .filter((row) => row.owner_id === user.id || row.mestre_id === user.id || row.payload?.mestreId === user.id || row.payload?.jogadores?.includes(user.id) || linkedCampaignIds.includes(row.id))
       .map((row) => row.id)
       .filter(Boolean);
     user.campaignIds = mergeUnique([...(user.campaignIds || []), ...onlineCampaignIds, ...remoteCampaigns.map((campaign) => campaign.id)]);
@@ -952,8 +1014,13 @@ async function loadOnlineWorkspace() {
       .sort((a, b) => String(b.created_at || b.at || "").localeCompare(String(a.created_at || a.at || "")));
     state.rolls = mergeById(state.rolls, remoteRolls).slice(0, 12);
 
-    if (!state.activeSheetId && user.sheetIds?.length) state.activeSheetId = user.sheetIds[0];
-    if (!state.activeCampaignId && user.campaignIds?.length) state.activeCampaignId = user.campaignIds[0];
+    const activeSheetBelongsToUser = state.sheets.some((sheet) => sheet.id === state.activeSheetId && (user.sheetIds || []).includes(sheet.id));
+    if (!activeSheetBelongsToUser && user.sheetIds?.length) state.activeSheetId = user.sheetIds[0];
+    const activeCampaignBelongsToUser = state.campaigns.some((campaign) =>
+      campaign.id === state.activeCampaignId &&
+      (campaign.mestreId === user.id || (campaign.jogadores || []).includes(user.id) || (user.campaignIds || []).includes(campaign.id))
+    );
+    if (!activeCampaignBelongsToUser && user.campaignIds?.length) state.activeCampaignId = user.campaignIds[0];
     const campaign = currentCampaign();
     if (campaign && !state.activeSessionId) state.activeSessionId = campaign.sessoes[0]?.id || null;
     syncCurrentSession();
@@ -966,7 +1033,7 @@ async function loadOnlineWorkspace() {
 function queueOnlineSave() {
   if (onlineLoadRunning) return;
   const user = currentUser();
-  if (!supabaseClient() || !user || user.id === "admin-master") return;
+  if (!supabaseClient() || !isOnlineUser(user)) return;
   window.clearTimeout(onlineSaveTimer);
   onlineSaveTimer = window.setTimeout(() => {
     saveOnlineState().catch((error) => {
@@ -977,7 +1044,11 @@ function queueOnlineSave() {
 
 function userCampaignsForSave(user) {
   if (!user) return [];
-  return state.campaigns.filter((campaign) => campaign.mestreId === user.id || user.role === "admin" || (user.campaignIds || []).includes(campaign.id) || (campaign.jogadores || []).includes(user.id));
+  return state.campaigns.filter((campaign) =>
+    campaign.mestreId === user.id ||
+    (user.campaignIds || []).includes(campaign.id) ||
+    (campaign.jogadores || []).includes(user.id)
+  );
 }
 
 function userSheetsForSave(user) {
@@ -993,12 +1064,13 @@ function campaignPayloadForSave(campaign) {
   return payload;
 }
 
-function campaignDatabaseRow(campaign, now = new Date().toISOString()) {
+function campaignDatabaseRow(campaign, now = new Date().toISOString(), user = currentUser()) {
   const payload = campaignPayloadForSave(campaign);
+  const ownerId = uuidOrNull(campaign.mestreId) || uuidOrNull(user?.id);
   return {
     id: campaign.id,
-    owner_id: campaign.mestreId,
-    mestre_id: campaign.mestreId,
+    owner_id: ownerId,
+    mestre_id: ownerId,
     nome: campaign.nome,
     invite_code: payload.invite_code,
     codigo_convite: payload.codigo_convite,
@@ -1017,8 +1089,8 @@ function sheetDatabaseRow(sheet, user, now = new Date().toISOString()) {
   const safeSheet = normalizeSheet(sheet);
   return {
     id: safeSheet.id,
-    user_id: user.id,
-    campanha_id: sheetCampaignId(safeSheet.id),
+    user_id: uuidOrNull(user.id),
+    campanha_id: uuidOrNull(sheetCampaignId(safeSheet.id)),
     nome: safeSheet.name || "Agente",
     jogador: safeSheet.player || user.username || "",
     atributos: {
@@ -1050,8 +1122,8 @@ function sheetDatabaseRow(sheet, user, now = new Date().toISOString()) {
 function minimalSheetDatabaseRow(row) {
   return {
     id: row.id,
-    user_id: row.user_id,
-    campanha_id: row.campanha_id,
+    user_id: uuidOrNull(row.user_id),
+    campanha_id: uuidOrNull(row.campanha_id),
     nome: row.nome,
     payload: row.payload,
     updated_at: row.updated_at
@@ -1136,15 +1208,19 @@ function legacyCampaignCandidates(user) {
   if (state.activeCampaignId) ids.add(state.activeCampaignId);
   const byId = state.campaigns.filter((campaign) => ids.has(campaign.id));
   const byOwner = state.campaigns.filter((campaign) => campaign.mestreId === user.id || (campaign.jogadores || []).includes(user.id));
-  return mergeById(byId, byOwner.length ? byOwner : state.campaigns).map(normalizeCampaignRecord);
+  return mergeById(byId, byOwner).map(normalizeCampaignRecord);
 }
 
 async function migrateLocalWorkspaceToSupabase(user = currentUser()) {
   const client = supabaseClient();
-  if (!client || !user || user.id === "admin-master" || onlineLoadRunning) return;
+  if (!client || !isOnlineUser(user) || onlineLoadRunning) return;
   const now = new Date().toISOString();
   const localSheets = legacySheetCandidates(user);
-  const localCampaigns = legacyCampaignCandidates(user);
+  const localCampaigns = state.hasLegacyLocalState ? legacyCampaignCandidates(user) : legacyCampaignCandidates(user).filter((campaign) =>
+    campaign.mestreId === user.id ||
+    (campaign.jogadores || []).includes(user.id) ||
+    (user.campaignIds || []).includes(campaign.id)
+  );
   if (!localSheets.length && !localCampaigns.length && !state.hasLegacyLocalState) return;
 
   console.log("[Supabase] Migrando dados locais para Supabase", { sheets: localSheets.length, campaigns: localCampaigns.length });
@@ -1161,10 +1237,10 @@ async function migrateLocalWorkspaceToSupabase(user = currentUser()) {
     });
     if (existing?.id) replaceCampaignId(campaign.id, existing.id);
     const safeCampaign = normalizeCampaignRecord(existing ? { ...(existing.payload || {}), ...campaign, id: existing.id } : campaign);
-    safeCampaign.mestreId = safeCampaign.mestreId || user.id;
+    safeCampaign.mestreId = uuidOrNull(safeCampaign.mestreId) || user.id;
     user.campaignIds = mergeUnique([...(user.campaignIds || []), safeCampaign.id]);
     console.log(existing ? "[Supabase] Campanha local ja existia no Supabase" : "[Supabase] Campanha criada no Supabase", safeCampaign.nome);
-    const { error } = await client.from("campanhas").upsert(campaignDatabaseRow(safeCampaign, now), { onConflict: "id" });
+    const { error } = await client.from("campanhas").upsert(campaignDatabaseRow(safeCampaign, now, user), { onConflict: "id" });
     if (error) {
       console.error("[Supabase] Erro Supabase", { table: "campanhas", campaign: safeCampaign, error });
       throw new Error(`campanhas: ${remoteErrorMessage(error)}`);
@@ -1204,13 +1280,16 @@ function listItemsFromText(text) {
 async function saveOnlineState() {
   const client = supabaseClient();
   const user = currentUser();
-  if (!client || !user || user.id === "admin-master" || onlineSaveRunning) return;
+  if (!client || !isOnlineUser(user) || onlineSaveRunning) return;
   onlineSaveRunning = true;
   try {
     syncCurrentSession();
     await saveOnlineUser(user);
     const now = new Date().toISOString();
-    const campaigns = userCampaignsForSave(user).map((campaign) => campaignDatabaseRow(campaign, now));
+    const campaigns = userCampaignsForSave(user)
+      .filter((campaign) => uuidOrNull(campaign.id))
+      .map((campaign) => campaignDatabaseRow(campaign, now, user))
+      .filter((campaign) => uuidOrNull(campaign.owner_id) && uuidOrNull(campaign.mestre_id));
     const sheets = userSheetsForSave(user).map((sheet) => sheetDatabaseRow(sheet, user, now));
     if (campaigns.length) {
       const { error } = await client.from("campanhas").upsert(campaigns, { onConflict: "id" });
@@ -1242,7 +1321,7 @@ async function saveOnlineState() {
         const { error } = await client.from("anotacoes").insert({
           user_id: user.id,
           personagem_id: sheet.id,
-          campanha_id: state.campaigns.find((campaign) => (campaign.personagens || []).includes(sheet.id))?.id || null,
+          campanha_id: uuidOrNull(state.campaigns.find((campaign) => (campaign.personagens || []).includes(sheet.id))?.id),
           titulo: `Anotacoes de ${sheet.name || "agente"}`,
           conteudo: sheet.notes || "",
           payload: {
@@ -1263,8 +1342,8 @@ async function saveOnlineState() {
       const { error } = await client.from("rolagens").upsert(state.rolls.map((roll) => ({
         id: roll.id,
         user_id: user.id,
-        campanha_id: state.activeCampaignId,
-        personagem_id: state.activeSheetId,
+        campanha_id: uuidOrNull(state.activeCampaignId),
+        personagem_id: uuidOrNull(state.activeSheetId),
         formula: roll.formula,
         resultado: String(roll.displayTotal || roll.total || ""),
         payload: { ...roll, created_at: now },
@@ -1281,7 +1360,7 @@ async function saveOnlineState() {
 async function deleteOnlineSheet(sheetId) {
   const client = supabaseClient();
   const user = currentUser();
-  if (!client || !user || user.id === "admin-master") return;
+  if (!client || !isOnlineUser(user) || !uuidOrNull(sheetId)) return;
   const inventory = await client.from("inventario").delete().eq("personagem_id", sheetId).eq("user_id", user.id);
   if (inventory.error) throw new Error(`inventario: ${remoteErrorMessage(inventory.error)}`);
   const notes = await client.from("anotacoes").delete().eq("personagem_id", sheetId).eq("user_id", user.id);
@@ -1382,7 +1461,7 @@ async function findCampaignByInviteOnline(code) {
 
 function campaignLookupFilters(campaign) {
   return [
-    campaign?.id ? `id.eq.${campaign.id}` : "",
+    uuidOrNull(campaign?.id) ? `id.eq.${campaign.id}` : "",
     campaign?.codigoConvite || campaign?.codigo_convite ? `codigo_convite.eq.${normalizeInviteCode(campaign.codigoConvite || campaign.codigo_convite)}` : "",
     campaign?.inviteCode || campaign?.invite_code ? `invite_code.eq.${normalizeInviteCode(campaign.inviteCode || campaign.invite_code)}` : ""
   ].filter(Boolean);
@@ -1404,7 +1483,9 @@ async function refreshActiveCampaignFromSupabase({ rerender = false } = {}) {
   const filters = campaignLookupFilters(localCampaign);
   const campaignQuery = filters.length
     ? client.from("campanhas").select("*").or(filters.join(",")).limit(1)
-    : client.from("campanhas").select("*").eq("id", localCampaign.id).limit(1);
+    : uuidOrNull(localCampaign.id)
+      ? client.from("campanhas").select("*").eq("id", localCampaign.id).limit(1)
+      : client.from("campanhas").select("*").limit(0);
   const { data: campaignRows, error: campaignError } = await campaignQuery;
   if (campaignError) throw new Error(`campanhas: ${remoteErrorMessage(campaignError)}`);
   const remoteCampaign = campaignRows?.[0]
@@ -1418,6 +1499,10 @@ async function refreshActiveCampaignFromSupabase({ rerender = false } = {}) {
   });
   state.activeCampaignId = campaign.id;
   if (!state.activeSessionId) state.activeSessionId = campaign.sessoes[0]?.id || null;
+  if (!uuidOrNull(campaign.id)) {
+    setSyncStatus("Campanha ativa sem UUID valido. Selecione uma campanha salva no Supabase.", true);
+    return campaign;
+  }
 
   const { data: characterRows, error: charactersError } = await client
     .from("personagens")
@@ -1426,7 +1511,7 @@ async function refreshActiveCampaignFromSupabase({ rerender = false } = {}) {
   if (charactersError) throw new Error(`personagens: ${remoteErrorMessage(charactersError)}`);
 
   const linkedRows = Array.isArray(characterRows) ? characterRows.filter((row) => row.campanha_id === campaign.id) : [];
-  const userIds = linkedRows.map((row) => row.user_id).filter(Boolean);
+  const userIds = linkedRows.map((row) => uuidOrNull(row.user_id)).filter(Boolean);
   let userMap = {};
   if (userIds.length) {
     const { data: userRows, error: usersError } = await client
@@ -1445,7 +1530,7 @@ async function refreshActiveCampaignFromSupabase({ rerender = false } = {}) {
     player: row.payload?.player || userMap[row.user_id]?.username || row.nome || "Jogador"
   }));
 
-  const linkedIds = linkedSheets.map((sheet) => sheet.id).filter(Boolean);
+  const linkedIds = linkedSheets.map((sheet) => uuidOrNull(sheet.id)).filter(Boolean);
   if (linkedIds.length) {
     const { data: inventoryRows, error: inventoryError } = await client
       .from("inventario")
@@ -2453,6 +2538,10 @@ function renderMasterShield() {
           <button type="button" data-shield-damage-apply="${escapeAttr(sheet.id)}">Dano</button>
           <button type="button" data-shield-heal-apply="${escapeAttr(sheet.id)}">Cura</button>
         </div>
+        <div class="shield-shortcuts">
+          <button type="button" data-shield-open-sheet="${escapeAttr(sheet.id)}">Ficha</button>
+          <button type="button" data-shield-open-inventory="${escapeAttr(sheet.id)}">Inventario</button>
+        </div>
       </article>
     `;
   }).join("");
@@ -2466,6 +2555,20 @@ function renderMasterShield() {
     button.addEventListener("click", () => {
       const input = els.masterShield.querySelector(`[data-shield-damage="${selectorEscape(button.dataset.shieldHealApply)}"]`);
       applySheetDamage(button.dataset.shieldHealApply, Number(input?.value || 0), "heal");
+    });
+  });
+  els.masterShield.querySelectorAll("[data-shield-open-sheet]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.activeSheetId = button.dataset.shieldOpenSheet;
+      masterInventorySheetId = button.dataset.shieldOpenSheet;
+      switchTab("fichas");
+    });
+  });
+  els.masterShield.querySelectorAll("[data-shield-open-inventory]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.activeSheetId = button.dataset.shieldOpenInventory;
+      masterInventorySheetId = button.dataset.shieldOpenInventory;
+      switchTab("inventario");
     });
   });
 }
@@ -2528,15 +2631,40 @@ function addNpcToken() {
   renderAll();
 }
 
+function renderMasterSheetNavigator(activeSheet) {
+  if (!isMasterMode()) return "";
+  const linkedSheets = sheetsLinkedToCampaign(currentCampaign());
+  if (!linkedSheets.length) return "";
+  return `
+    <section class="sheet-master-switcher note-paper">
+      <div>
+        <b>Fichas vinculadas</b>
+        <span>${linkedSheets.length} agente(s) nesta campanha</span>
+      </div>
+      <div class="sheet-master-buttons">
+        ${linkedSheets.map((sheet) => `
+          <button type="button" data-master-sheet="${escapeAttr(sheet.id)}" class="${sheet.id === activeSheet.id ? "selected" : ""}">
+            <span class="mini-sheet-photo" style="${sheet.portrait ? `background-image:url('${escapeAttr(sheet.portrait)}')` : ""}">${sheet.portrait ? "" : escapeHtml(initials(sheet.name || "AG"))}</span>
+            <b>${escapeHtml(sheet.name || "Agente")}</b>
+            <small>${escapeHtml(sheet.player || "Jogador")} | ${escapeHtml(sheet.className || "Sem classe")} | ${escapeHtml(sheet.nex || "5%")}</small>
+          </button>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
 function renderCrisisSheet() {
   if (!els.crisisSheet) return;
   const sheet = ensureActiveSheet();
+  const canEditNex = isMasterMode();
   const skills = parseSkills(sheet);
   const attacks = splitLines(sheet.attacks);
   const abilities = splitLines(sheet.abilities);
   const inventory = splitLines(sheet.inventory);
   const rituals = splitLines(sheet.rituals);
   els.crisisSheet.innerHTML = `
+    ${renderMasterSheetNavigator(sheet)}
     <section class="dossier-sheet">
       <div class="paper-clip clip-a"></div>
       <div class="paper-clip clip-b"></div>
@@ -2579,7 +2707,7 @@ function renderCrisisSheet() {
 
         <div class="progress-row">
           <label>Nivel <input data-sheet-field="rank" value="${escapeAttr(sheet.rank || "")}" /></label>
-          <label class="nex-field">Exp / NEX <span><input data-sheet-field="nex" value="${escapeAttr(sheet.nex || "0%")}" /><button type="button" data-open-catalog="nex">Catalogo</button></span></label>
+          <label class="nex-field">Exp / NEX <span><input data-sheet-field="nex" value="${escapeAttr(sheet.nex || "0%")}" ${canEditNex ? "" : "readonly aria-readonly=\"true\""} />${canEditNex ? `<button type="button" data-open-catalog="nex">Catalogo</button>` : `<small>Somente mestre</small>`}</span></label>
           <label>PE / rodada <input data-sheet-field="peRound" type="number" value="${sheet.peRound}" /></label>
         </div>
         ${renderNexProgress(sheet)}
@@ -2684,6 +2812,14 @@ function renderCrisisSheet() {
     button.addEventListener("click", () => openCatalog(button.dataset.openCatalog));
   });
 
+  els.crisisSheet.querySelectorAll("[data-master-sheet]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.activeSheetId = button.dataset.masterSheet;
+      masterInventorySheetId = button.dataset.masterSheet;
+      renderAll();
+    });
+  });
+
   els.crisisSheet.querySelector("[data-profile-photo]")?.addEventListener("change", (event) => {
     uploadProfilePhoto(event.target.files?.[0]);
   });
@@ -2708,6 +2844,10 @@ function renderCrisisSheet() {
 }
 
 function openCatalog(field) {
+  if (field === "nex" && !isMasterMode()) {
+    setSyncStatus("Apenas o mestre pode alterar NEX.", true);
+    return;
+  }
   const entries = catalogForField(field);
   if (!entries.length) {
     if (field === "attacks") addSheetLine(field);
@@ -2873,12 +3013,19 @@ function catalogTitle(field) {
 function addCatalogEntry(field, entry) {
   const sheet = ensureActiveSheet();
   if (isSheetChoiceField(field)) {
+    if (field === "nex" && !isMasterMode()) return;
+    const previousNex = parseNex(sheet.nex);
     sheet[field] = entry.name;
     const selectedPath = catalog.paths.find((path) => normalizeKey(path.name) === normalizeKey(sheet.pathName));
     if (field === "className" && normalizeKey(selectedPath?.className) !== normalizeKey(entry.name)) {
       sheet.pathName = "";
     }
+    recalculateDerivedStats(sheet, field);
     renderAll();
+    if (field === "nex") {
+      const nextNex = parseNex(sheet.nex);
+      if (nextNex > previousNex) showNexUpdateMessage(sheet, previousNex, nextNex);
+    }
     return;
   }
   if (field === "attacks") {
@@ -3589,21 +3736,95 @@ function nexResourceLine(sheet, step) {
   return `Ganha neste marco: +${current.hpMax - previous.hpMax} PV max, +${current.peMax - previous.peMax} PE max, +${current.sanMax - previous.sanMax} SAN max${peRoundDelta ? `, +${peRoundDelta} PE/rodada` : ""}. Totais: PV ${current.hpMax}, PE ${current.peMax}, SAN ${current.sanMax}, PE/rodada ${current.peRound}.`;
 }
 
-function renderNexProgress(sheet) {
+function currentNexStep(sheet) {
   const current = parseNex(sheet.nex);
+  return nexProgression.find((step) => step.nex === current)
+    || [...nexProgression].reverse().find((step) => step.nex <= current)
+    || nexProgression[0];
+}
+
+function nextNexStep(step) {
+  return nexProgression.find((item) => item.nex > step.nex) || null;
+}
+
+function matchesSheetChoice(entry, sheet) {
+  const className = normalizeKey(sheet.className);
+  const pathName = normalizeKey(sheet.pathName);
+  const role = normalizeKey(sheet.role);
+  const entryClass = normalizeKey(entry.className || (["Combatente", "Especialista", "Ocultista"].includes(entry.type) ? entry.type : ""));
+  const entryPath = normalizeKey(entry.pathName);
+  const entryOrigin = normalizeKey(entry.origin);
+  if (entryPath && entryPath !== pathName) return false;
+  if (entryClass && entryClass !== className) return false;
+  if (entryOrigin && entryOrigin !== role) return false;
+  if (entry.allClasses && className) return true;
+  return Boolean(entryPath || entryClass || entryOrigin);
+}
+
+function nexSpecificEntries(sheet, nex) {
+  const entries = [];
+  if (Number(nex) === 5) {
+    const origin = catalog.origins.find((item) => normalizeKey(item.name) === normalizeKey(sheet.role));
+    const klass = catalog.classes.find((item) => normalizeKey(item.name) === normalizeKey(sheet.className));
+    const path = catalog.paths.find((item) => normalizeKey(item.name) === normalizeKey(sheet.pathName));
+    if (origin) entries.push({ title: `Origem: ${origin.name}`, text: `Pericias: ${origin.skills || "-"}. Talento: ${origin.talent || "-"}. ${origin.desc || ""}` });
+    if (klass) entries.push({ title: `Classe: ${klass.name}`, text: `${klass.desc || ""} ${classResourceFormula(sheet)}` });
+    if (path) entries.push({ title: `Trilha: ${path.name}`, text: path.desc || "Especializacao escolhida para esta classe." });
+  }
+  catalog.abilities
+    .filter((entry) => Number(entry.nex || 5) === Number(nex) && matchesSheetChoice(entry, sheet))
+    .forEach((entry) => entries.push({
+      title: `${entry.type}: ${entry.name}`,
+      text: [
+        entry.desc || "",
+        entry.className ? `Classe: ${entry.className}.` : "",
+        entry.pathName ? `Trilha: ${entry.pathName}.` : "",
+        entry.origin ? `Origem: ${entry.origin}.` : ""
+      ].filter(Boolean).join(" ")
+    }));
+  if (canUseRituals(sheet)) {
+    catalog.rituals
+      .filter((entry) => ritualNexRequirement(entry.circle || 1) === Number(nex))
+      .forEach((entry) => {
+        const stats = catalogStats[entry.name] || {};
+        entries.push({
+          title: `Ritual liberado: ${entry.name}`,
+          text: `Circulo ${entry.circle || 1}. Custo: ${stats.cost || "-"}. Dano/Efeito: ${stats.damage || "-"}. Requisito: ${stats.requirement || "-"}.`
+        });
+      });
+  }
+  return entries;
+}
+
+function nexSpecificHtml(sheet, step) {
+  const entries = nexSpecificEntries(sheet, step.nex);
+  if (!entries.length) {
+    return `<p class="nex-empty">Nenhuma habilidade especifica de origem, classe ou trilha registrada para este marco. Use o Catalogo para adicionar poderes liberados pela mesa.</p>`;
+  }
+  return `<div class="nex-specific-list">${entries.map((entry) => `
+    <article>
+      <b>${escapeHtml(entry.title)}</b>
+      <span>${escapeHtml(entry.text)}</span>
+    </article>
+  `).join("")}</div>`;
+}
+
+function renderNexProgress(sheet) {
+  const step = currentNexStep(sheet);
+  const next = nextNexStep(step);
   return `
     <section class="nex-progress-panel">
       <b>Progressao de NEX</b>
       <p>NEX atual: ${escapeHtml(sheet.nex || "0%")}. ${escapeHtml(classResourceFormula(sheet))}</p>
-      <div class="nex-progress-table">
-        ${nexProgression.map((step) => `
-          <article class="${step.nex <= current ? "unlocked" : "locked"}">
-            <strong>${step.nex}%</strong>
-            <span>${escapeHtml(nexResourceLine(sheet, step))}</span>
-            <small>${step.gains.map(escapeHtml).join(" | ")}</small>
-          </article>
-        `).join("")}
+      <div class="nex-current-card">
+        <strong>${step.nex}%</strong>
+        <div>
+          <span>${escapeHtml(nexResourceLine(sheet, step))}</span>
+          <small>${step.gains.map(escapeHtml).join(" | ")}</small>
+        </div>
       </div>
+      ${nexSpecificHtml(sheet, step)}
+      ${next ? `<p class="nex-next"><b>Proximo marco ${next.nex}%:</b> ${escapeHtml(nexResourceLine(sheet, next))}</p>` : ""}
     </section>
   `;
 }
@@ -3618,7 +3839,7 @@ function showNexUpdateMessage(sheet, previousNex, nextNex) {
     <div>
       <b>${escapeHtml(sheet.name || "Agente")} evoluiu para ${nextNex}% NEX</b>
       <p>${escapeHtml(classResourceFormula(sheet))}</p>
-      ${gains.map((step) => `<p><strong>${step.nex}%</strong><br>${escapeHtml(nexResourceLine(sheet, step))}<br>${step.gains.map(escapeHtml).join(" | ")}</p>`).join("")}
+      ${gains.map((step) => `<p><strong>${step.nex}%</strong><br>${escapeHtml(nexResourceLine(sheet, step))}<br>${step.gains.map(escapeHtml).join(" | ")}${nexSpecificEntries(sheet, step.nex).length ? `<br>${nexSpecificEntries(sheet, step.nex).map((entry) => `${escapeHtml(entry.title)}: ${escapeHtml(entry.text)}`).join("<br>")}` : ""}</p>`).join("")}
       <button type="button">Entendido</button>
     </div>
   `;
@@ -4789,6 +5010,14 @@ function showApp(mode = state.currentMode || "player") {
   document.body.classList.toggle("sheet-area", mode === "sheet");
   document.body.classList.toggle("master-view", mode === "master");
   document.body.classList.toggle("player-view", mode === "player" || mode === "sheet");
+  if (mode === "master" || mode === "player") {
+    const campaign = currentCampaign();
+    const session = currentSession();
+    if (campaign && session) {
+      seedSessionTokensFromSheets(campaign, session);
+      applySessionToTable(session);
+    }
+  }
   if (mode !== "master" && state.activeTab === "biblioteca") state.activeTab = "mesa";
   if (mode === "sheet") state.activeTab = ["fichas", "inventario", "anotacoes"].includes(state.activeTab) ? state.activeTab : "fichas";
   renderAll();
@@ -5007,6 +5236,7 @@ function hideSignup() {
 }
 
 function switchTab(tabId) {
+  if (tabId === "biblioteca" && !isMasterMode()) tabId = "mesa";
   state.activeTab = tabId;
   document.querySelectorAll(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === tabId));
   document.querySelectorAll(".view").forEach((view) => view.classList.toggle("active-view", view.id === tabId));
