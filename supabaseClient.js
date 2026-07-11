@@ -10,4 +10,5 @@ if (!window.supabase) {
   );
 
   console.log("Supabase conectado:", SUPABASE_URL);
+  console.log("Supabase client disponível");
 }

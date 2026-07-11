@@ -700,6 +700,11 @@ function supabaseClient() {
   return window.arquivosSupabase || null;
 }
 
+function logSupabaseAvailability() {
+  if (supabaseClient()) console.log("Supabase client disponível");
+  else console.warn("Supabase client indisponível");
+}
+
 function setSyncStatus(message, isError = false) {
   if (els.syncStatus) {
     els.syncStatus.textContent = message;
@@ -876,36 +881,54 @@ async function createAccountOnline(username, email, password, confirmPassword = 
 async function loginAccountOnline(username, password) {
   const identifier = username.trim();
   const client = supabaseClient();
-  if (!client) throw new Error("Supabase nao carregou.");
+    console.log("Iniciando login", { identifier });
+  if (!client) throw new Error("Supabase nao carregou. Verifique sua conexao e recarregue a pagina.");
   if (!identifier || !password) throw new Error("Informe usuario/email e senha.");
-  console.log("[Supabase] Buscando usuario para login", { identifier });
-  setSyncStatus("Entrando pelo Supabase...");
-  const users = await safeSelect("usuarios", "*");
-  const userRow = users.find((row) =>
-    row.username?.toLowerCase() === identifier.toLowerCase() ||
-    row.email?.toLowerCase() === identifier.toLowerCase()
-  );
-  if (!userRow) throw new Error("Usuario nao encontrado no Supabase.");
-  const accountData = userFromRow(userRow);
-  if (!isUuid(accountData.id)) {
-    console.error("[Supabase] Erro Supabase", { table: "usuarios", motivo: "usuario.id nao e UUID", userRow, accountData });
-    throw new Error("Usuario encontrado, mas o id salvo no Supabase nao e UUID valido.");
+  try {
+    console.log("Buscando usuário", { identifier });
+    setSyncStatus("Entrando pelo Supabase...");
+    const { data, error } = await client.from("usuarios").select("*");
+    if (error) {
+      console.error("[Supabase] Erro Supabase", { table: "usuarios", error });
+      throw new Error(`usuarios: ${remoteErrorMessage(error)}`);
+    }
+    const users = Array.isArray(data) ? data : [];
+    const userRow = users.find((row) =>
+      row.username?.toLowerCase() === identifier.toLowerCase() ||
+      row.email?.toLowerCase() === identifier.toLowerCase()
+    );
+    if (!userRow) throw new Error("Usuario nao encontrado no Supabase.");
+    console.log("Usuário encontrado", { id: userRow.id, username: userRow.username, role: userRow.role || userRow.payload?.role });
+    const accountData = userFromRow(userRow);
+    if (!isUuid(accountData.id)) {
+      console.error("[Supabase] Erro Supabase", { table: "usuarios", motivo: "usuario.id nao e UUID", userRow, accountData });
+      throw new Error("Usuario encontrado, mas o id salvo no Supabase nao e UUID valido.");
+    }
+    const passwordHash = await hashPassword(password);
+    if (accountData.passwordHash && accountData.passwordHash !== passwordHash) throw new Error("Senha incorreta.");
+    if (!accountData.passwordHash) {
+      accountData.passwordHash = passwordHash;
+      await saveOnlineUser(accountData);
+    }
+    const account = upsertLocalAccount(accountData);
+    state.currentUserId = account.id;
+    console.log("[Supabase] Usuario carregado do Supabase", account);
+    console.log("[Supabase] currentUser.id", account.id);
+    console.log("[Supabase] currentUser.role", normalizeRole(account.role));
+    try {
+      await migrateLocalWorkspaceToSupabase(account);
+      await loadOnlineWorkspace();
+      setSyncStatus("Dados online carregados.");
+    } catch (workspaceError) {
+      console.error("[Supabase] Erro Supabase", { etapa: "carregar workspace apos login", error: workspaceError });
+      setSyncStatus(`Login feito, mas nao consegui carregar tudo: ${workspaceError.message}`, true);
+    }
+    return account;
+  } catch (error) {
+    console.error("Erro no login", error);
+    setSyncStatus(`Erro no login: ${error.message}`, true);
+    throw error;
   }
-  const passwordHash = await hashPassword(password);
-  if (accountData.passwordHash && accountData.passwordHash !== passwordHash) throw new Error("Senha incorreta.");
-  if (!accountData.passwordHash) {
-    accountData.passwordHash = passwordHash;
-    await saveOnlineUser(accountData);
-  }
-  const account = upsertLocalAccount(accountData);
-  state.currentUserId = account.id;
-  console.log("[Supabase] Usuario carregado do Supabase", account);
-  console.log("[Supabase] currentUser.id", account.id);
-  console.log("[Supabase] currentUser.role", normalizeRole(account.role));
-  await migrateLocalWorkspaceToSupabase(account);
-  await loadOnlineWorkspace();
-  setSyncStatus("Dados online carregados.");
-  return account;
 }
 
 async function saveOnlineUser(user = currentUser()) {
@@ -5709,6 +5732,7 @@ function sheetCampaignNames(sheetId) {
 function setAuthError(message) {
   const error = document.querySelector("#loginError");
   if (error) error.textContent = message || "";
+  if (message) console.warn("[Login]", message);
 }
 
 function setSignupError(message) {
@@ -5811,8 +5835,23 @@ document.querySelectorAll("[data-tab]").forEach((tab) => {
   tab.addEventListener("click", () => switchTab(tab.dataset.tab));
 });
 
-document.querySelector("#loginForm")?.addEventListener("submit", async (event) => {
+const loginForm = document.querySelector("#loginForm");
+const loginSubmit = document.querySelector("#loginSubmit");
+
+loginSubmit?.addEventListener("click", () => {
+  console.log("Clique em Entrar detectado");
+});
+
+if (!loginForm) {
+  console.error("Erro no login", new Error("Formulario de login nao encontrado."));
+} else {
+  console.log("Listener do login ativo");
+}
+
+loginForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
+  console.log("Clique em Entrar detectado");
+  setAuthError("");
   try {
     try {
       await loginAccountOnline(document.querySelector("#loginUser").value, document.querySelector("#loginPassword").value);
@@ -5825,7 +5864,8 @@ document.querySelector("#loginForm")?.addEventListener("submit", async (event) =
     setAuthError("");
     showPortal();
   } catch (error) {
-    setAuthError(error.message);
+    console.error("Erro no login", error);
+    setAuthError(error.message || "Nao consegui entrar. Veja o console para detalhes.");
   }
 });
 
@@ -6265,6 +6305,8 @@ document.querySelectorAll("[data-roll]").forEach((button) => {
 });
 
 async function bootApp() {
+  console.log("App iniciado");
+  logSupabaseAvailability();
   load();
   if (state.activeTab === "configuracoes") state.activeTab = "mesa";
   if (!document.getElementById(state.activeTab)) state.activeTab = "mesa";
@@ -6284,5 +6326,23 @@ async function bootApp() {
   else showLogin();
 }
 
-bootApp();
+window.addEventListener("error", (event) => {
+  console.error("Erro no login", event.error || event.message);
+  if (!document.querySelector("#loginScreen")?.classList.contains("hidden")) {
+    setAuthError(`Erro ao iniciar: ${event.error?.message || event.message}`);
+  }
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  console.error("Erro no login", event.reason);
+  if (!document.querySelector("#loginScreen")?.classList.contains("hidden")) {
+    setAuthError(`Erro ao conectar: ${event.reason?.message || event.reason}`);
+  }
+});
+
+bootApp().catch((error) => {
+  console.error("Erro no login", error);
+  setAuthError(`Erro ao iniciar o app: ${error.message}`);
+  showLogin();
+});
 
