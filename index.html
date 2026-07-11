@@ -269,7 +269,7 @@
                 <label>Tamanho <input id="quickTokenScale" type="range" min="70" max="145" value="100" /></label>
                 <button id="quickAddToken" type="button">Adicionar</button>
               </details>
-              <details class="dice-drawer">
+              <details class="dice-drawer" hidden>
                 <summary>Dados</summary>
                 <div class="quick-roll dice-paper">
                   <label for="quickFormula">Rolagem</label>
@@ -323,8 +323,23 @@
               <div class="crt-screen">
                 <pre id="crtStatus">&gt; SISTEMA ARQUIVOS v1.07
 &gt; USUARIO: JOGADOR
-&gt; AGUARDANDO COMANDO...</pre>
-                <div id="rollResult" class="roll-result">Pronto para rolar.</div>
+&gt; AGUARDANDO COMANDO<span class="crt-dots" aria-hidden="true"></span></pre>
+                <div class="crt-roll-config" aria-label="Configuracao de rolagem">
+                  <label for="crtDicePreset">Dado</label>
+                  <select id="crtDicePreset">
+                    <option value="1d20+3" selected>d20 + 3</option>
+                    <option value="1d20">d20</option>
+                    <option value="1d12">d12</option>
+                    <option value="1d10">d10</option>
+                    <option value="1d8">d8</option>
+                    <option value="1d6">d6</option>
+                    <option value="1d4">d4</option>
+                    <option value="1d100">d100</option>
+                    <option value="2d20">2d20</option>
+                  </select>
+                  <input id="crtFormula" type="text" value="1d20+3" aria-label="Formula de rolagem" />
+                </div>
+                <button id="rollResult" class="roll-result" type="button" title="Rolar os dados da formula atual">Pronto para rolar.</button>
               </div>
             </section>
 
@@ -437,7 +452,7 @@
             <h2>Arquivos da campanha</h2>
             <p>Cada sessao da campanha e um arquivo numerado. Mestres podem criar, liberar, bloquear e arquivar sessoes.</p>
             <div id="campaignFiles" class="archive-card-list"></div>
-            <div class="dice-board embedded-dice">
+            <div class="dice-board embedded-dice" hidden>
               <div class="dice-composer">
                 <label>
                   Formula

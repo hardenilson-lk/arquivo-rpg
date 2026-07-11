@@ -24,6 +24,7 @@ let isSpacePressed = false;
 let panState = null;
 let mapPlayerPreview = false;
 let diceClearTimer = null;
+let diceAudio = null;
 let masterInventorySheetId = null;
 const LEGACY_STORAGE_KEY = "mesa-arcana";
 const SESSION_STORAGE_KEY = "arquivo-rpg-session";
@@ -88,6 +89,8 @@ const els = {
   syncStatus: document.querySelector("#syncStatus"),
   sidebarToggle: document.querySelector("#sidebarToggle"),
   rollResult: document.querySelector("#rollResult"),
+  crtDicePreset: document.querySelector("#crtDicePreset"),
+  crtFormula: document.querySelector("#crtFormula"),
   rollLog: document.querySelector("#rollLog")
 };
 
@@ -681,6 +684,10 @@ function loginAccount(username, password) {
 let onlineSaveTimer = null;
 let onlineSaveRunning = false;
 let onlineLoadRunning = false;
+let gridSyncTimer = null;
+let gridSyncRunning = false;
+let lastLocalGridChangeAt = 0;
+let lastAppliedGridUpdate = "";
 
 function supabaseClient() {
   return window.arquivosSupabase || null;
@@ -1030,7 +1037,7 @@ async function loadOnlineWorkspace() {
   }
 }
 
-function queueOnlineSave() {
+function queueOnlineSave(delay = 900) {
   if (onlineLoadRunning) return;
   const user = currentUser();
   if (!supabaseClient() || !isOnlineUser(user)) return;
@@ -1039,7 +1046,14 @@ function queueOnlineSave() {
     saveOnlineState().catch((error) => {
       setSyncStatus(`Backup local salvo. Supabase falhou: ${error.message}`, true);
     });
-  }, 900);
+  }, delay);
+}
+
+function markGridChanged() {
+  lastLocalGridChangeAt = Date.now();
+  syncCurrentSession();
+  saveLightSession();
+  queueOnlineSave(180);
 }
 
 function userCampaignsForSave(user) {
@@ -1370,6 +1384,27 @@ async function deleteOnlineSheet(sheetId) {
   console.log("[Supabase] Ficha apagada online:", sheetId);
 }
 
+async function deleteOnlineCampaign(campaignId) {
+  const client = supabaseClient();
+  const user = currentUser();
+  if (!client || !isOnlineUser(user) || !uuidOrNull(campaignId)) return;
+  const campaign = state.campaigns.find((item) => item.id === campaignId);
+  const ownsCampaign = user.role === "admin" || campaign?.mestreId === user.id;
+  if (!ownsCampaign) throw new Error("Somente o mestre da campanha pode excluir este arquivo.");
+  const updateSheets = await client
+    .from("personagens")
+    .update({ campanha_id: null })
+    .eq("campanha_id", campaignId);
+  if (updateSheets.error) throw new Error(`personagens: ${remoteErrorMessage(updateSheets.error)}`);
+  const rolls = await client.from("rolagens").delete().eq("campanha_id", campaignId);
+  if (rolls.error && !isMissingColumnError(rolls.error)) throw new Error(`rolagens: ${remoteErrorMessage(rolls.error)}`);
+  const notes = await client.from("anotacoes").delete().eq("campanha_id", campaignId);
+  if (notes.error && !isMissingColumnError(notes.error)) throw new Error(`anotacoes: ${remoteErrorMessage(notes.error)}`);
+  const campaignDelete = await client.from("campanhas").delete().eq("id", campaignId);
+  if (campaignDelete.error) throw new Error(`campanhas: ${remoteErrorMessage(campaignDelete.error)}`);
+  console.log("[Supabase] Campanha apagada online:", campaignId);
+}
+
 function createCampaignForCurrentUser(name) {
   const user = currentUser();
   if (!user) throw new Error("Faca login primeiro.");
@@ -1561,6 +1596,87 @@ async function refreshActiveCampaignFromSupabase({ rerender = false } = {}) {
     renderAll();
   }
   return campaign;
+}
+
+function renderGridSyncUpdate() {
+  renderControls();
+  renderGrid();
+  renderTokenList();
+  renderMasterShield();
+  renderNpcMiniCards();
+  window.archiveUI?.render(state);
+}
+
+function applyRemoteGridCampaign(row) {
+  const localCampaign = currentCampaign();
+  if (!row || !localCampaign) return false;
+  const remoteCampaign = normalizeCampaignRecord({ ...(row.payload || {}), id: row.id });
+  const activeSessionId = state.activeSessionId || localCampaign.sessoes?.[0]?.id;
+  const remoteSession = remoteCampaign.sessoes.find((session) => session.id === activeSessionId) || remoteCampaign.sessoes[0];
+  if (!remoteSession) return false;
+  const mergedCampaign = normalizeCampaignRecord({
+    ...localCampaign,
+    ...remoteCampaign,
+    personagens: remoteCampaign.personagens?.length ? remoteCampaign.personagens : localCampaign.personagens,
+    jogadores: mergeUnique([...(localCampaign.jogadores || []), ...(remoteCampaign.jogadores || [])])
+  });
+  state.campaigns = state.campaigns.map((campaign) => campaign.id === localCampaign.id ? mergedCampaign : campaign);
+  state.activeCampaignId = mergedCampaign.id;
+  state.activeSessionId = remoteSession.id;
+  applySessionToTable(remoteSession);
+  syncCurrentSession();
+  return true;
+}
+
+async function refreshGridFromSupabase() {
+  const client = supabaseClient();
+  const user = currentUser();
+  const campaign = currentCampaign();
+  if (!client || !isOnlineUser(user) || !uuidOrNull(campaign?.id)) return;
+  if (gridSyncRunning || onlineLoadRunning || onlineSaveRunning) return;
+  if (Date.now() - lastLocalGridChangeAt < 1400) return;
+  gridSyncRunning = true;
+  try {
+    const { data, error } = await client
+      .from("campanhas")
+      .select("id,payload,updated_at")
+      .eq("id", campaign.id)
+      .limit(1);
+    if (error) throw new Error(`campanhas: ${remoteErrorMessage(error)}`);
+    const row = Array.isArray(data) ? data[0] : null;
+    if (!row) return;
+    const updateKey = `${row.id}:${row.updated_at || JSON.stringify(row.payload?.sessoes || [])}`;
+    if (updateKey === lastAppliedGridUpdate) return;
+    if (!applyRemoteGridCampaign(row)) return;
+    lastAppliedGridUpdate = updateKey;
+    renderGridSyncUpdate();
+    setSyncStatus("Grid sincronizado com a mesa.");
+  } catch (error) {
+    console.warn("[Supabase] Falha ao sincronizar grid.", error);
+  } finally {
+    gridSyncRunning = false;
+  }
+}
+
+function stopGridSync() {
+  if (!gridSyncTimer) return;
+  window.clearInterval(gridSyncTimer);
+  gridSyncTimer = null;
+}
+
+function updateGridSyncLoop(mode = state.currentMode) {
+  const shouldSync = ["master", "player"].includes(mode)
+    && uuidOrNull(state.activeCampaignId)
+    && Boolean(supabaseClient())
+    && isOnlineUser(currentUser());
+  if (!shouldSync) {
+    stopGridSync();
+    return;
+  }
+  if (!gridSyncTimer) {
+    gridSyncTimer = window.setInterval(refreshGridFromSupabase, 2200);
+  }
+  refreshGridFromSupabase();
 }
 
 async function joinCampaignWithInvite(code) {
@@ -1880,13 +1996,13 @@ function renderGrid() {
     if (token.portrait) {
       piece.classList.add("token-portrait");
       piece.style.backgroundImage = `url("${token.portrait}")`;
-      piece.innerHTML = `${tokenFacing(token)}${tokenBars(token)}`;
+      piece.innerHTML = `${tokenFacing(token)}${tokenBars(token)}${tokenNameTag(token)}`;
     } else {
       piece.style.background = token.color;
       piece.style.color = token.color;
-      piece.innerHTML = `<span class="token-initials">${escapeHtml(initials(token.name))}</span>${tokenFacing(token)}${tokenBars(token)}`;
+      piece.innerHTML = `<span class="token-initials">${escapeHtml(initials(tokenDisplayName(token)))}</span>${tokenFacing(token)}${tokenBars(token)}${tokenNameTag(token)}`;
     }
-    piece.title = `${token.name} | luz ${token.light}${token.hidden ? " | invisivel" : ""}${controllable ? " | duplo clique: dano/cura | clique direito: virar" : ""}`;
+    piece.title = `${tokenDisplayName(token)} | luz ${token.light}${token.hidden ? " | invisivel" : ""}${controllable ? " | duplo clique: dano/cura | clique direito: virar" : ""}`;
     piece.draggable = controllable;
     piece.addEventListener("click", (event) => {
       event.stopPropagation();
@@ -1920,6 +2036,15 @@ function renderGrid() {
     });
     els.battlefield.append(piece);
   });
+}
+
+function tokenDisplayName(token) {
+  const sheet = token?.sheetId ? state.sheets.find((item) => item.id === token.sheetId) : null;
+  return sheet?.name || token?.name || "Token";
+}
+
+function tokenNameTag(token) {
+  return `<span class="token-name-tag">${escapeHtml(tokenDisplayName(token))}</span>`;
 }
 
 function tokenBars(token) {
@@ -2361,6 +2486,7 @@ function moveSelectedToken(x, y) {
   token.y = y;
   if (state.map.fog?.enabled && state.map.fog.mode === "vision") updateFogVisibilityFromTokens();
   renderAll();
+  markGridChanged();
 }
 
 function isMovementBlocked(token, x, y) {
@@ -2387,6 +2513,7 @@ function rotateTokenFacing(tokenId) {
   token.facing = order[(current + 1 + order.length) % order.length];
   if (state.map.fog?.enabled && state.map.fog.mode === "vision") updateFogVisibilityFromTokens();
   renderAll();
+  markGridChanged();
 }
 
 function renderTokenList() {
@@ -2411,6 +2538,7 @@ function renderTokenList() {
     toggle.addEventListener("click", () => {
       token.hidden = !token.hidden;
       renderAll();
+      markGridChanged();
     });
     const remove = document.createElement("button");
     remove.type = "button";
@@ -2419,6 +2547,7 @@ function renderTokenList() {
     remove.addEventListener("click", () => {
       state.tokens = state.tokens.filter((item) => item.id !== token.id);
       renderAll();
+      markGridChanged();
     });
     const rotate = document.createElement("button");
     rotate.type = "button";
@@ -2503,12 +2632,14 @@ function renderNpcMiniCards() {
       if (!token) return;
       token.hidden = !token.hidden;
       renderAll();
+      markGridChanged();
     });
   });
   els.npcMiniCards.querySelectorAll("[data-npc-remove]").forEach((button) => {
     button.addEventListener("click", () => {
       state.tokens = state.tokens.filter((item) => item.id !== button.dataset.npcRemove);
       renderAll();
+      markGridChanged();
     });
   });
 }
@@ -2600,6 +2731,7 @@ function addToken(source = "sidebar") {
   });
   if (nameInput) nameInput.value = "";
   renderAll();
+  markGridChanged();
 }
 
 function addNpcToken() {
@@ -2629,6 +2761,7 @@ function addNpcToken() {
   if (els.npcImage) els.npcImage.value = "";
   pendingNpcPortrait = "";
   renderAll();
+  markGridChanged();
 }
 
 function renderMasterSheetNavigator(activeSheet) {
@@ -4089,6 +4222,7 @@ function applySheetDamage(sheetId, amount, mode = "damage") {
   sheet.hp = mode === "heal" ? Math.min(max, current + value) : Math.max(0, current - finalDamage);
   syncSheetToken(sheet);
   renderAll();
+  markGridChanged();
   animateTokenImpactForSheet(sheet.id, mode, mode === "damage" ? finalDamage : value);
 }
 
@@ -4106,6 +4240,7 @@ function applyTokenDamage(tokenId, amount, mode = "damage") {
   token.hp = mode === "heal" ? Math.min(max, current + value) : Math.max(0, current - value);
   syncCurrentSession();
   renderAll();
+  markGridChanged();
   animateTokenImpact(token.id, mode, value);
 }
 
@@ -4788,6 +4923,7 @@ function rollFormula(formula) {
 function performRoll(formula) {
   try {
     const result = rollFormula(formula);
+    if (els.crtFormula) els.crtFormula.value = result.formula;
     switchTab("mesa");
     playDiceSound(result);
     animateDiceRoll(result);
@@ -4796,6 +4932,7 @@ function performRoll(formula) {
       void els.rollResult.offsetWidth;
       els.rollResult.classList.add("roll-result-pulse", rollSpecialClass(result) || "roll-normal");
       els.rollResult.textContent = result.rollMode === "d20-test" ? `Resultado final: ${result.finalTotal}` : result.displayTotal;
+      els.rollResult.title = `${result.formula} | ${result.detail}`;
     }, 460);
     state.rolls.unshift({ ...result, id: crypto.randomUUID(), at: new Date().toLocaleTimeString("pt-BR") });
     state.rolls = state.rolls.slice(0, 12);
@@ -4803,16 +4940,40 @@ function performRoll(formula) {
     save();
   } catch (error) {
     els.rollResult.textContent = error.message;
+    els.rollResult.title = "Corrija a formula e clique para tentar de novo.";
   }
 }
 
+function currentRollFormula() {
+  const crt = els.crtFormula?.value;
+  const quick = document.querySelector("#quickFormula")?.value;
+  const full = document.querySelector("#diceFormula")?.value;
+  return String(crt || quick || full || "1d20").trim() || "1d20";
+}
+
+function getDiceAudio() {
+  if (!diceAudio) {
+    diceAudio = new Audio("./assets/dice-roll.mp3");
+    diceAudio.preload = "auto";
+    diceAudio.volume = 0.72;
+  }
+  return diceAudio;
+}
+
 function playDiceSound(result = null) {
-  const audio = new Audio("./assets/dice-roll.mp3");
-  audio.volume = 0.58;
-  audio.play().catch(() => {});
+  try {
+    const audio = getDiceAudio();
+    audio.pause();
+    audio.currentTime = 0;
+    audio.volume = 0.72;
+    audio.play().catch((error) => console.warn("[Audio] Som dos dados bloqueado pelo navegador.", error));
+  } catch (error) {
+    console.warn("[Audio] Nao consegui tocar o arquivo de dados.", error);
+  }
   const AudioContext = window.AudioContext || window.webkitAudioContext;
   if (!AudioContext) return;
   const context = new AudioContext();
+  if (context.state === "suspended") context.resume().catch(() => {});
   const now = context.currentTime;
   const gain = context.createGain();
   gain.gain.setValueAtTime(0.0001, now);
@@ -4877,12 +5038,6 @@ function animateDiceRoll(result) {
     els.diceStage.append(runes);
   }
 
-  const total = document.createElement("div");
-  total.className = `dice-total persistent-total result-sweep ${specialClass}`;
-  const specialLabel = rollSpecialLabel(result);
-  const headline = specialLabel || (result.rollMode === "d20-test" ? `Resultado ${result.displayTotal}` : result.rollMode === "rps" ? result.displayTotal : "Resultados");
-  total.innerHTML = `<strong>${escapeHtml(headline)}</strong><span>${escapeHtml(result.formula)} | ${escapeHtml(result.detail)}</span>`;
-  els.diceStage.append(total);
   diceClearTimer = window.setTimeout(() => {
     els.diceStage.innerHTML = "";
     els.diceStage.className = "dice-stage";
@@ -4988,6 +5143,7 @@ async function saveCurrentFile() {
 }
 
 function showLogin() {
+  stopGridSync();
   document.querySelector("#loginScreen")?.classList.remove("hidden");
   document.querySelector("#portalScreen")?.classList.add("hidden");
   document.querySelector("#appShell")?.classList.add("hidden");
@@ -4995,6 +5151,7 @@ function showLogin() {
 }
 
 function showPortal() {
+  stopGridSync();
   document.querySelector("#loginScreen")?.classList.add("hidden");
   document.querySelector("#portalScreen")?.classList.remove("hidden");
   document.querySelector("#appShell")?.classList.add("hidden");
@@ -5023,6 +5180,7 @@ function showApp(mode = state.currentMode || "player") {
   renderAll();
   switchTab(state.activeTab || "mesa");
   if (state.activeTab === "mesa") window.setTimeout(fitGridToView, 60);
+  updateGridSyncLoop(mode);
 }
 
 function renderPortal() {
@@ -5049,6 +5207,7 @@ function renderPortal() {
           ${campaign.mestreId === user.id || user.role === "admin" ? `<button type="button" data-portal-open="${escapeAttr(campaign.id)}" data-mode="master">Mestre</button>` : ""}
           <button type="button" data-portal-open="${escapeAttr(campaign.id)}" data-mode="player">Jogador</button>
           <button type="button" data-link-sheet="${escapeAttr(campaign.id)}">Levar ficha ativa</button>
+          ${campaign.mestreId === user.id || user.role === "admin" ? `<button class="danger-action" type="button" data-delete-campaign="${escapeAttr(campaign.id)}">Excluir campanha</button>` : ""}
         </div>
       </article>
     `).join("") : `<p>Nenhuma campanha vinculada.</p>`;
@@ -5070,19 +5229,17 @@ function renderPortal() {
     `).join("") : `<p>Nenhuma ficha criada.</p>`;
   }
   document.querySelectorAll("[data-portal-open]").forEach((button) => {
-    button.addEventListener("click", async () => {
+    button.addEventListener("click", () => {
       state.activeCampaignId = button.dataset.portalOpen;
       const campaign = currentCampaign();
       state.activeSessionId = campaign?.sessoes.find((session) => button.dataset.mode === "master" || session.visibleToPlayers)?.id || campaign?.sessoes[0]?.id || null;
       state.activeTab = "mesa";
-      if (button.dataset.mode === "master") {
-        try {
-          await refreshActiveCampaignFromSupabase();
-        } catch (error) {
-          setSyncStatus(`Nao consegui atualizar campanha online: ${error.message}`, true);
-        }
-      }
       showApp(button.dataset.mode);
+      if (button.dataset.mode === "master") {
+        refreshActiveCampaignFromSupabase({ rerender: true }).catch((error) => {
+          setSyncStatus(`Nao consegui atualizar campanha online: ${error.message}`, true);
+        });
+      }
     });
   });
   document.querySelectorAll("[data-link-sheet]").forEach((button) => {
@@ -5132,6 +5289,32 @@ function renderPortal() {
       if (state.activeSheetId === id) state.activeSheetId = user.sheetIds[0] || state.sheets[0]?.id || null;
       renderPortal();
       save();
+    });
+  });
+  document.querySelectorAll("[data-delete-campaign]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const id = button.dataset.deleteCampaign;
+      const campaign = state.campaigns.find((item) => item.id === id);
+      if (!campaign) return;
+      if (!window.confirm(`Excluir a campanha "${campaign.nome}"? As fichas dos jogadores serao mantidas.`)) return;
+      try {
+        button.disabled = true;
+        button.textContent = "Excluindo...";
+        await deleteOnlineCampaign(id);
+        setSyncStatus("Campanha excluida do Supabase.");
+      } catch (error) {
+        setSyncStatus(`Campanha excluida localmente. Falha online: ${error.message}`, true);
+      }
+      user.campaignIds = (user.campaignIds || []).filter((campaignId) => campaignId !== id);
+      state.campaigns = state.campaigns.filter((item) => item.id !== id);
+      state.sheets = state.sheets.map((sheet) => normalizeSheet(sheet));
+      if (state.activeCampaignId === id) {
+        state.activeCampaignId = user.campaignIds[0] || state.campaigns[0]?.id || null;
+        state.activeSessionId = currentCampaign()?.sessoes?.[0]?.id || null;
+      }
+      renderPortal();
+      save();
+      saveOnlineUser(user).catch((error) => console.warn("[Supabase] Nao consegui atualizar usuario apos exclusao.", error));
     });
   });
 }
@@ -5658,15 +5841,27 @@ els.quickDarkness?.addEventListener("input", () => {
   renderAll();
 });
 document.querySelectorAll(".map-quick-tools details").forEach((details) => {
-  details.addEventListener("mouseenter", () => {
+  details.addEventListener("toggle", () => {
+    if (!details.open) return;
     document.querySelectorAll(".map-quick-tools details").forEach((other) => {
       if (other !== details) other.removeAttribute("open");
     });
-    details.setAttribute("open", "");
   });
-  details.addEventListener("mouseleave", () => {
-    details.removeAttribute("open");
-  });
+});
+function closeMapQuickTools() {
+  document.querySelectorAll(".map-quick-tools details[open]").forEach((details) => details.removeAttribute("open"));
+}
+document.addEventListener("pointerdown", (event) => {
+  const quickTools = document.querySelector(".map-quick-tools");
+  if (!quickTools || quickTools.contains(event.target)) return;
+  closeMapQuickTools();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  const hasOpenTool = Boolean(document.querySelector(".map-quick-tools details[open]"));
+  if (!hasOpenTool) return;
+  event.preventDefault();
+  closeMapQuickTools();
 });
 els.sheetForm.addEventListener("submit", saveSheet);
 els.chatForm?.addEventListener("submit", (event) => {
@@ -5674,8 +5869,16 @@ els.chatForm?.addEventListener("submit", (event) => {
   sendChatMessage(els.chatText?.value || "");
 });
 document.querySelector("#newSheet").addEventListener("click", clearSheetForm);
-document.querySelector("#rollDice").addEventListener("click", () => performRoll(document.querySelector("#diceFormula").value));
-document.querySelector("#quickRoll").addEventListener("click", () => performRoll(document.querySelector("#quickFormula").value));
+document.querySelector("#rollDice")?.addEventListener("click", () => performRoll(document.querySelector("#diceFormula")?.value || currentRollFormula()));
+document.querySelector("#quickRoll")?.addEventListener("click", () => performRoll(document.querySelector("#quickFormula")?.value || currentRollFormula()));
+els.crtDicePreset?.addEventListener("change", () => {
+  if (els.crtFormula) els.crtFormula.value = els.crtDicePreset.value;
+  if (els.rollResult) {
+    els.rollResult.textContent = "Pronto para rolar.";
+    els.rollResult.title = `Rolar ${els.crtDicePreset.value}`;
+  }
+});
+els.rollResult?.addEventListener("click", () => performRoll(currentRollFormula()));
 document.querySelector("#rpsButton")?.addEventListener("click", playRps);
 document.querySelector("#clearRollLog")?.addEventListener("click", () => {
   state.rolls = [];
@@ -5685,7 +5888,8 @@ document.querySelector("#clearRollLog")?.addEventListener("click", () => {
 });
 document.querySelectorAll("[data-roll]").forEach((button) => {
   button.addEventListener("click", () => {
-    document.querySelector("#diceFormula").value = button.dataset.roll;
+    if (els.crtFormula) els.crtFormula.value = button.dataset.roll;
+    if (document.querySelector("#diceFormula")) document.querySelector("#diceFormula").value = button.dataset.roll;
     performRoll(button.dataset.roll);
   });
 });

@@ -81,7 +81,7 @@
     const lastRoll = state.rolls?.[0];
     const campaign = currentCampaignFrom(state);
     const session = currentSessionFrom(state, campaign);
-    crt.textContent = [
+    const statusLines = [
       "> SISTEMA ARQUIVOS v1.07",
       `> USUARIO: ${mode === "master" ? "MESTRE" : "JOGADOR"}`,
       `> CAMPANHA: ${safeLine(campaign?.nome || state.campaignName || "MESA DE COMBATE")}`,
@@ -90,12 +90,22 @@
       `> TOKENS CARREGADOS: ${state.tokens?.length || 0}`,
       `> AGENTE: ${safeLine(sheet.name || "NAO IDENTIFICADO")}`,
       lastRoll ? `> ULTIMA ROLAGEM: ${lastRoll.total} EM ${safeLine(lastRoll.formula)}` : "> AGUARDANDO ROLAGEM...",
-      "> AGUARDANDO COMANDO..."
-    ].join("\n");
+    ];
+    crt.innerHTML = `${statusLines.map(escapeHtml).join("\n")}\n&gt; AGUARDANDO COMANDO<span class="crt-dots" aria-hidden="true"></span>`;
   }
 
   function safeLine(value) {
     return String(value || "").replace(/\n/g, " ").toUpperCase();
+  }
+
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, (char) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;"
+    })[char]);
   }
 
   function renderCards(state, sheet) {
