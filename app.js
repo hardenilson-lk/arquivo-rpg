@@ -688,6 +688,13 @@ let gridSyncTimer = null;
 let gridSyncRunning = false;
 let lastLocalGridChangeAt = 0;
 let lastAppliedGridUpdate = "";
+let gridRealtimeChannel = null;
+let sheetRealtimeChannel = null;
+let activeRealtimeKey = "";
+const tokenSaveTimers = new Map();
+const sheetSaveTimers = new Map();
+const syncedGridTokenIds = new Set();
+let suppressOnlineSave = false;
 
 function supabaseClient() {
   return window.arquivosSupabase || null;
@@ -1049,11 +1056,12 @@ function queueOnlineSave(delay = 900) {
   }, delay);
 }
 
-function markGridChanged() {
+function markGridChanged(token = null, mode = "move") {
   lastLocalGridChangeAt = Date.now();
   syncCurrentSession();
   saveLightSession();
-  queueOnlineSave(180);
+  const changedToken = token || state.tokens.find((item) => item.id === state.selectedToken);
+  if (changedToken) queueGridTokenSave(changedToken, mode, mode === "move" ? 180 : 250);
 }
 
 function userCampaignsForSave(user) {
@@ -1607,6 +1615,291 @@ function renderGridSyncUpdate() {
   window.archiveUI?.render(state);
 }
 
+function currentSceneId() {
+  return String(state.activeSessionId || currentSession()?.id || "arquivo-inicial");
+}
+
+function facingToDegrees(facing = "s") {
+  return { n: 0, e: 90, s: 180, w: 270 }[facing] ?? 180;
+}
+
+function degreesToFacing(degrees = 180) {
+  const normalized = ((Number(degrees) % 360) + 360) % 360;
+  if (normalized >= 315 || normalized < 45) return "n";
+  if (normalized < 135) return "e";
+  if (normalized < 225) return "s";
+  return "w";
+}
+
+function gridTokenRow(token, mode = "full") {
+  const campaign = currentCampaign();
+  const user = currentUser();
+  const campaignId = uuidOrNull(campaign?.id);
+  if (!campaignId || !token?.id) return null;
+  if (!uuidOrNull(token.id)) token.id = crypto.randomUUID();
+  const base = {
+    id: token.id,
+    campanha_id: campaignId,
+    cena_id: currentSceneId(),
+    personagem_id: uuidOrNull(token.sheetId),
+    updated_by: uuidOrNull(user?.id),
+    updated_at: new Date().toISOString()
+  };
+  if (mode === "move") {
+    return { ...base, x: Number(token.x) || 0, y: Number(token.y) || 0 };
+  }
+  return {
+    ...base,
+    nome: tokenDisplayName(token),
+    imagem_url: token.portrait || "",
+    x: Number(token.x) || 0,
+    y: Number(token.y) || 0,
+    largura: Number(token.width || token.w || 1),
+    altura: Number(token.height || token.h || 1),
+    rotacao: Number(token.rotation ?? facingToDegrees(token.facing)),
+    visivel: token.hidden !== true,
+    bloqueado: token.locked === true,
+    payload: { ...token }
+  };
+}
+
+function tokenFromGridRow(row) {
+  const payload = row?.payload || {};
+  return {
+    ...payload,
+    id: row.id,
+    sheetId: row.personagem_id || payload.sheetId || "",
+    name: row.nome || payload.name || "Token",
+    portrait: row.imagem_url || payload.portrait || "",
+    x: Number(row.x) || 0,
+    y: Number(row.y) || 0,
+    width: Number(row.largura || payload.width || 1),
+    height: Number(row.altura || payload.height || 1),
+    rotation: Number(row.rotacao ?? payload.rotation ?? facingToDegrees(payload.facing)),
+    facing: payload.facing || degreesToFacing(row.rotacao),
+    hidden: row.visivel === false,
+    locked: row.bloqueado === true
+  };
+}
+
+function applyGridTokenRow(row, eventType = "UPDATE") {
+  if (!row || String(row.cena_id || "") !== currentSceneId()) return;
+  const token = tokenFromGridRow(row);
+  const index = state.tokens.findIndex((item) => item.id === token.id);
+  if (eventType === "DELETE") {
+    syncedGridTokenIds.delete(token.id);
+    if (index >= 0) {
+      state.tokens.splice(index, 1);
+      syncCurrentSession();
+      els.battlefield?.querySelector(`[data-token-id="${selectorEscape(token.id)}"]`)?.remove();
+      renderTokenList();
+      renderMasterShield();
+      renderNpcMiniCards();
+    }
+    return;
+  }
+  syncedGridTokenIds.add(token.id);
+  if (index >= 0) state.tokens[index] = { ...state.tokens[index], ...token };
+  else state.tokens.push(token);
+  syncCurrentSession();
+  if (index >= 0) updateTokenElement(state.tokens.find((item) => item.id === token.id));
+  else renderGrid();
+  renderTokenList();
+  renderMasterShield();
+  renderNpcMiniCards();
+}
+
+function updateTokenElement(token) {
+  if (!token || !els.battlefield) return;
+  const node = els.battlefield.querySelector(`[data-token-id="${selectorEscape(token.id)}"]`);
+  if (!node) {
+    renderGrid();
+    return;
+  }
+  node.style.left = `calc(${token.x} * var(--cell-size))`;
+  node.style.top = `calc(${token.y} * var(--cell-size))`;
+  node.classList.toggle("token-hidden", token.hidden === true);
+  node.classList.remove("facing-n", "facing-e", "facing-s", "facing-w");
+  node.classList.add(`facing-${token.facing || "s"}`);
+  node.title = `${tokenDisplayName(token)} | luz ${token.light}${token.hidden ? " | invisivel" : ""}`;
+}
+
+async function loadGridTokensFromSupabase({ seedIfEmpty = true } = {}) {
+  const client = supabaseClient();
+  const campaign = currentCampaign();
+  const campaignId = uuidOrNull(campaign?.id);
+  if (!client || !campaignId) return;
+  const sceneId = currentSceneId();
+  const { data, error } = await client
+    .from("grid_tokens")
+    .select("*")
+    .eq("campanha_id", campaignId)
+    .eq("cena_id", sceneId);
+  if (error) {
+    console.error("[Supabase] Erro Supabase", { table: "grid_tokens", error });
+    return;
+  }
+  if (Array.isArray(data) && data.length) {
+    syncedGridTokenIds.clear();
+    data.forEach((row) => {
+      if (row.id) syncedGridTokenIds.add(row.id);
+    });
+    state.tokens = data.map(tokenFromGridRow);
+    syncCurrentSession();
+    renderGridSyncUpdate();
+    return;
+  }
+  if (seedIfEmpty && state.tokens.length) await upsertGridTokens(state.tokens, "full");
+}
+
+async function upsertGridTokens(tokens, mode = "full") {
+  const client = supabaseClient();
+  const rows = tokens.map((token) => gridTokenRow(token, mode)).filter(Boolean);
+  if (!client || !rows.length) return;
+  const { error } = await client.from("grid_tokens").upsert(rows, { onConflict: "id" });
+  if (error) {
+    console.error("[Supabase] Erro Supabase", { table: "grid_tokens", rows, error });
+    return;
+  }
+  rows.forEach((row) => {
+    if (row.id) syncedGridTokenIds.add(row.id);
+  });
+  console.log("Movimento enviado", rows.map((row) => ({ id: row.id, x: row.x, y: row.y })));
+}
+
+function queueGridTokenSave(token, mode = "move", delay = 180) {
+  if (!token?.id) return;
+  const saveMode = mode === "move" && !syncedGridTokenIds.has(token.id) ? "full" : mode;
+  window.clearTimeout(tokenSaveTimers.get(token.id));
+  tokenSaveTimers.set(token.id, window.setTimeout(() => {
+    tokenSaveTimers.delete(token.id);
+    upsertGridTokens([token], saveMode);
+  }, delay));
+}
+
+async function deleteGridTokenOnline(tokenId) {
+  const client = supabaseClient();
+  const campaignId = uuidOrNull(currentCampaign()?.id);
+  if (!client || !campaignId || !tokenId) return;
+  const { error } = await client
+    .from("grid_tokens")
+    .delete()
+    .eq("id", tokenId)
+    .eq("campanha_id", campaignId)
+    .eq("cena_id", currentSceneId());
+  if (error) console.error("[Supabase] Erro Supabase", { table: "grid_tokens", tokenId, error });
+  else syncedGridTokenIds.delete(tokenId);
+}
+
+function startRealtimeSync(mode = state.currentMode) {
+  const client = supabaseClient();
+  const campaign = currentCampaign();
+  const user = currentUser();
+  const campaignId = uuidOrNull(campaign?.id);
+  const sceneId = currentSceneId();
+  const key = `${campaignId || ""}:${sceneId}:${mode}`;
+  if (!client || !campaignId || !isOnlineUser(user) || !["master", "player"].includes(mode)) {
+    stopRealtimeSync();
+    return;
+  }
+  if (activeRealtimeKey === key && gridRealtimeChannel && sheetRealtimeChannel) return;
+  stopRealtimeSync();
+  activeRealtimeKey = key;
+  loadGridTokensFromSupabase().catch((error) => console.error("[Supabase] Erro Supabase", error));
+  gridRealtimeChannel = client
+    .channel(`grid_tokens:${campaignId}:${sceneId}`)
+    .on("postgres_changes", { event: "*", schema: "public", table: "grid_tokens", filter: `campanha_id=eq.${campaignId}` }, (payload) => {
+      try {
+        const row = payload.new?.id ? payload.new : payload.old;
+        if (String(row?.cena_id || "") !== sceneId) return;
+        console.log("Movimento recebido", payload);
+        applyGridTokenRow(row, payload.eventType);
+      } catch (error) {
+        console.error("Erro Realtime", error);
+      }
+    })
+    .subscribe((status, error) => {
+      if (error) console.error("Erro Realtime", error);
+      if (status === "SUBSCRIBED") console.log("Realtime conectado ao grid");
+    });
+  sheetRealtimeChannel = client
+    .channel(`personagens:${campaignId}`)
+    .on("postgres_changes", { event: "UPDATE", schema: "public", table: "personagens", filter: `campanha_id=eq.${campaignId}` }, (payload) => {
+      try {
+        applyRemoteSheetRow(payload.new);
+        console.log("Ficha atualizada", payload.new?.id);
+      } catch (error) {
+        console.error("Erro Realtime", error);
+      }
+    })
+    .subscribe((status, error) => {
+      if (error) console.error("Erro Realtime", error);
+    });
+}
+
+function stopRealtimeSync() {
+  const client = supabaseClient();
+  if (client && gridRealtimeChannel) client.removeChannel(gridRealtimeChannel);
+  if (client && sheetRealtimeChannel) client.removeChannel(sheetRealtimeChannel);
+  gridRealtimeChannel = null;
+  sheetRealtimeChannel = null;
+  activeRealtimeKey = "";
+  syncedGridTokenIds.clear();
+}
+
+function applyRemoteSheetRow(row) {
+  if (!row?.id) return;
+  const remote = normalizeSheet({ ...(row.payload || {}), id: row.id, name: row.payload?.name || row.nome || "", player: row.payload?.player || row.jogador || "" });
+  const index = state.sheets.findIndex((sheet) => sheet.id === remote.id);
+  if (index >= 0) state.sheets[index] = normalizeSheet({ ...state.sheets[index], ...remote });
+  else state.sheets.push(remote);
+  if (state.activeSheetId === remote.id) {
+    renderCrisisSheet();
+    renderInventoryView();
+    renderNotesView();
+  }
+  syncSheetToken(remote);
+  renderMasterShield();
+  renderTokenList();
+}
+
+function queueSheetPatch(sheet, field, delay = 800) {
+  const client = supabaseClient();
+  const user = currentUser();
+  if (!client || !isOnlineUser(user) || !uuidOrNull(sheet?.id)) return;
+  const key = `${sheet.id}:${field}`;
+  window.clearTimeout(sheetSaveTimers.get(key));
+  sheetSaveTimers.set(key, window.setTimeout(async () => {
+    sheetSaveTimers.delete(key);
+    try {
+      await saveSheetFieldOnline(sheet, field);
+    } catch (error) {
+      console.error("[Supabase] Erro Supabase", error);
+    }
+  }, delay));
+}
+
+async function saveSheetFieldOnline(sheet, field) {
+  const client = supabaseClient();
+  const user = currentUser();
+  if (!client || !isOnlineUser(user) || !uuidOrNull(sheet?.id)) return;
+  const now = new Date().toISOString();
+  const safeSheet = normalizeSheet(sheet);
+  const patch = { updated_at: now };
+  if (field === "name") patch.nome = safeSheet.name || "Agente";
+  if (field === "player") patch.jogador = safeSheet.player || user.username || "";
+  if (["agi", "str", "int", "pre", "vig"].includes(field)) {
+    patch.atributos = { agi: safeSheet.agi, for: safeSheet.str, int: safeSheet.int, pre: safeSheet.pre, vig: safeSheet.vig };
+  }
+  if (["skills", "skillMods"].includes(field)) patch.pericias = { text: safeSheet.skills || "", mods: safeSheet.skillMods || {} };
+  if (["hp", "hpMax", "pe", "peMax"].includes(field)) patch.vida = { atual: safeSheet.hp, max: safeSheet.hpMax, pe: safeSheet.pe, peMax: safeSheet.peMax };
+  if (["san", "sanMax"].includes(field)) patch.sanidade = { atual: safeSheet.san, max: safeSheet.sanMax };
+  patch.payload = safeSheet;
+  const { error } = await client.from("personagens").update(patch).eq("id", safeSheet.id);
+  if (error) throw new Error(`personagens: ${remoteErrorMessage(error)}`);
+  console.log("Ficha atualizada", { id: safeSheet.id, field });
+}
+
 function applyRemoteGridCampaign(row) {
   const localCampaign = currentCampaign();
   if (!row || !localCampaign) return false;
@@ -1665,18 +1958,8 @@ function stopGridSync() {
 }
 
 function updateGridSyncLoop(mode = state.currentMode) {
-  const shouldSync = ["master", "player"].includes(mode)
-    && uuidOrNull(state.activeCampaignId)
-    && Boolean(supabaseClient())
-    && isOnlineUser(currentUser());
-  if (!shouldSync) {
-    stopGridSync();
-    return;
-  }
-  if (!gridSyncTimer) {
-    gridSyncTimer = window.setInterval(refreshGridFromSupabase, 2200);
-  }
-  refreshGridFromSupabase();
+  stopGridSync();
+  startRealtimeSync(mode);
 }
 
 async function joinCampaignWithInvite(code) {
@@ -1875,7 +2158,17 @@ function blankSheet(name = "Novo agente", player = "Local") {
 function save() {
   syncCurrentSession();
   saveLightSession();
+  if (suppressOnlineSave) return;
   queueOnlineSave();
+}
+
+function localOnlyRender() {
+  suppressOnlineSave = true;
+  try {
+    renderAll();
+  } finally {
+    suppressOnlineSave = false;
+  }
 }
 
 function syncCurrentSession() {
@@ -2485,8 +2778,8 @@ function moveSelectedToken(x, y) {
   token.x = x;
   token.y = y;
   if (state.map.fog?.enabled && state.map.fog.mode === "vision") updateFogVisibilityFromTokens();
-  renderAll();
-  markGridChanged();
+  localOnlyRender();
+  markGridChanged(token, "move");
 }
 
 function isMovementBlocked(token, x, y) {
@@ -2512,8 +2805,8 @@ function rotateTokenFacing(tokenId) {
   const current = order.indexOf(token.facing || "s");
   token.facing = order[(current + 1 + order.length) % order.length];
   if (state.map.fog?.enabled && state.map.fog.mode === "vision") updateFogVisibilityFromTokens();
-  renderAll();
-  markGridChanged();
+  localOnlyRender();
+  markGridChanged(token, "full");
 }
 
 function renderTokenList() {
@@ -2537,8 +2830,8 @@ function renderTokenList() {
     toggle.textContent = token.hidden ? "Mostrar" : "Ocultar";
     toggle.addEventListener("click", () => {
       token.hidden = !token.hidden;
-      renderAll();
-      markGridChanged();
+      localOnlyRender();
+      markGridChanged(token, "full");
     });
     const remove = document.createElement("button");
     remove.type = "button";
@@ -2546,8 +2839,8 @@ function renderTokenList() {
     remove.textContent = "Remover";
     remove.addEventListener("click", () => {
       state.tokens = state.tokens.filter((item) => item.id !== token.id);
-      renderAll();
-      markGridChanged();
+      localOnlyRender();
+      deleteGridTokenOnline(token.id);
     });
     const rotate = document.createElement("button");
     rotate.type = "button";
@@ -2631,15 +2924,16 @@ function renderNpcMiniCards() {
       const token = state.tokens.find((item) => item.id === button.dataset.npcHide);
       if (!token) return;
       token.hidden = !token.hidden;
-      renderAll();
-      markGridChanged();
+      localOnlyRender();
+      markGridChanged(token, "full");
     });
   });
   els.npcMiniCards.querySelectorAll("[data-npc-remove]").forEach((button) => {
     button.addEventListener("click", () => {
+      const tokenId = button.dataset.npcRemove;
       state.tokens = state.tokens.filter((item) => item.id !== button.dataset.npcRemove);
-      renderAll();
-      markGridChanged();
+      localOnlyRender();
+      deleteGridTokenOnline(tokenId);
     });
   });
 }
@@ -2717,7 +3011,7 @@ function addToken(source = "sidebar") {
   const colorInput = quick ? els.quickTokenColor : els.tokenColor;
   const lightInput = quick ? els.quickTokenLight : els.tokenLight;
   const name = nameInput?.value.trim() || `Token ${state.tokens.length + 1}`;
-  state.tokens.push({
+  const token = {
     id: crypto.randomUUID(),
     name,
     type: "token",
@@ -2728,10 +3022,11 @@ function addToken(source = "sidebar") {
     facing: "s",
     x: Math.floor(state.map.cols / 2),
     y: Math.floor(state.map.rows / 2)
-  });
+  };
+  state.tokens.push(token);
   if (nameInput) nameInput.value = "";
-  renderAll();
-  markGridChanged();
+  localOnlyRender();
+  markGridChanged(token, "full");
 }
 
 function addNpcToken() {
@@ -2739,7 +3034,7 @@ function addNpcToken() {
   const hp = clamp(Number(els.npcHp?.value || 20), 1, 999);
   const defense = clamp(Number(els.npcDefense?.value || 10), 0, 99);
   const light = clamp(Number(els.npcLight?.value || 0), 0, 10);
-  state.tokens.push({
+  const token = {
     id: crypto.randomUUID(),
     name,
     type: "npc",
@@ -2755,13 +3050,14 @@ function addNpcToken() {
     hpMax: hp,
     x: Math.floor(state.map.cols / 2),
     y: Math.floor(state.map.rows / 2)
-  });
+  };
+  state.tokens.push(token);
   if (els.npcName) els.npcName.value = "";
   if (els.npcAttack) els.npcAttack.value = "";
   if (els.npcImage) els.npcImage.value = "";
   pendingNpcPortrait = "";
-  renderAll();
-  markGridChanged();
+  localOnlyRender();
+  markGridChanged(token, "full");
 }
 
 function renderMasterSheetNavigator(activeSheet) {
@@ -2793,9 +3089,9 @@ function renderCrisisSheet() {
   const canEditNex = isMasterMode();
   const skills = parseSkills(sheet);
   const attacks = splitLines(sheet.attacks);
-  const abilities = splitLines(sheet.abilities);
+  const abilities = splitSheetEntries(sheet.abilities);
   const inventory = splitLines(sheet.inventory);
-  const rituals = splitLines(sheet.rituals);
+  const rituals = splitSheetEntries(sheet.rituals);
   els.crisisSheet.innerHTML = `
     ${renderMasterSheetNavigator(sheet)}
     <section class="dossier-sheet">
@@ -2886,7 +3182,7 @@ function renderCrisisSheet() {
       <div class="bottom-panel talents-panel">
         <div class="section-title mini-title">Talentos / Habilidades</div>
         <button class="paper-add" type="button" data-add-line="abilities">Adicionar</button>
-        ${renderLineList(abilities, "Nenhum talento cadastrado", "abilities")}
+        ${renderAbilityPanel(sheet)}
       </div>
 
       <div class="bottom-panel equipment-panel">
@@ -2898,7 +3194,7 @@ function renderCrisisSheet() {
       <div class="bottom-panel rituals-panel">
         <div class="section-title mini-title">Rituais</div>
         <button class="paper-add" type="button" data-add-line="rituals">Adicionar</button>
-        ${renderLineList(rituals, "Nenhum ritual cadastrado", "rituals")}
+        ${renderRitualPanel(sheet)}
       </div>
 
       <div class="rules-panel">
@@ -3154,7 +3450,8 @@ function addCatalogEntry(field, entry) {
       sheet.pathName = "";
     }
     recalculateDerivedStats(sheet, field);
-    renderAll();
+    localOnlyRender();
+    queueSheetPatch(sheet, field, 800);
     if (field === "nex") {
       const nextNex = parseNex(sheet.nex);
       if (nextNex > previousNex) showNexUpdateMessage(sheet, previousNex, nextNex);
@@ -3172,14 +3469,16 @@ function addCatalogEntry(field, entry) {
       special: entry.desc || stats.bonus || "-"
     });
     sheet.attacks = splitLines(sheet.attacks).concat(line).join("\n");
-    renderAll();
+    localOnlyRender();
+    queueSheetPatch(sheet, "attacks", 800);
     return;
   }
-  const safeDesc = entry.desc.replace(/[,;\n]/g, " ");
-  const line = `${entry.name} | ${catalogMetaText(entry)} - ${safeDesc}`.replace(/[,;\n]/g, " ");
-  sheet[field] = splitLines(sheet[field]).concat(line).join("\n");
+  const safeDesc = String(entry.desc || "").replace(/\n/g, " ");
+  const line = `${entry.name} | ${catalogMetaText(entry)} - ${safeDesc}`;
+  sheet[field] = splitSheetEntries(sheet[field]).concat(line).join("\n");
   if (["inventory", "abilities", "rituals"].includes(field)) recalculateDerivedStats(sheet, field);
-  renderAll();
+  localOnlyRender();
+  queueSheetPatch(sheet, field, 800);
 }
 
 function catalogDetail(entry) {
@@ -3198,25 +3497,32 @@ function catalogDetail(entry) {
 
 function catalogMeta(entry) {
   const stats = catalogStats[entry.name] || {};
-  if (catalog.origins.includes(entry)) {
+  const entryType = normalizeKey(entry.type);
+  const isInventoryEntry = catalog.inventory.includes(entry) || catalog.inventory.some((item) => normalizeKey(item.name) === normalizeKey(entry.name));
+  const isRitualEntry = catalog.rituals.includes(entry) || catalog.rituals.some((item) => normalizeKey(item.name) === normalizeKey(entry.name));
+  if (catalog.origins.includes(entry) || entry.origin || entryType.includes("origem escolhida")) {
     return [
-      `Pericias: ${entry.skills || "-"}`,
-      `Talento: ${entry.talent || "-"}`
-    ];
+      entry.origin ? `Origem: ${entry.origin}` : "",
+      entry.skills ? `Pericias: ${entry.skills}` : "",
+      entry.talent ? `Talento: ${entry.talent}` : ""
+    ].filter(Boolean);
   }
-  if (catalog.classes.includes(entry)) {
-    return [`Classe: ${entry.name}`];
+  if (catalog.classes.includes(entry) || entryType.includes("classe escolhida")) {
+    return [
+      `Classe: ${entry.name}`,
+      entry.desc?.includes("Base") ? "" : `Recursos: ${classResourceFormula(ensureActiveSheet())}`
+    ];
   }
   if (catalog.nex.includes(entry)) {
     return [`NEX: ${entry.name}`];
   }
-  if (catalog.paths.includes(entry)) {
+  if (catalog.paths.includes(entry) || entry.pathName || entry.className || entryType.includes("trilha escolhida")) {
     return [
       `Classe: ${entry.className || "-"}`,
-      `Trilha: ${entry.name}`
-    ];
+      entry.pathName ? `Trilha: ${entry.pathName}` : `Trilha: ${entry.name}`
+    ].filter(Boolean);
   }
-  if (catalog.inventory.includes(entry)) {
+  if (isInventoryEntry) {
     return [
       `Tipo: ${stats.category || entry.type}`,
       `Volume: ${stats.volume ?? "-"}`,
@@ -3226,7 +3532,7 @@ function catalogMeta(entry) {
       stats.bonus ? `Uso: ${stats.bonus}` : ""
     ].filter(Boolean);
   }
-  if (catalog.rituals.includes(entry)) {
+  if (isRitualEntry) {
     return [
       `Circulo: ${stats.circle || entry.circle || 1}`,
       `NEX minimo: ${entry.nex || ritualNexRequirement(entry.circle || 1)}%`,
@@ -3366,13 +3672,98 @@ function updateAttackField(index, field, value, rerender = true) {
   attack[field] = value;
   attacks[index] = serializeAttackLine(attack);
   sheet.attacks = attacks.join("\n");
-  if (rerender) renderAll();
-  else save();
+  if (rerender) localOnlyRender();
+  else {
+    suppressOnlineSave = true;
+    save();
+    suppressOnlineSave = false;
+  }
+  queueSheetPatch(sheet, "attacks", 800);
 }
 
 function renderLineList(lines, emptyText, field) {
   if (!lines.length) return `<ul class="paper-lines"><li class="paper-line-empty">${escapeHtml(emptyText)}</li></ul>`;
   return `<ul class="paper-lines">${lines.slice(0, 8).map((item, index) => `<li><span>${escapeHtml(item)}</span><button type="button" data-remove-line="${escapeAttr(field)}" data-index="${index}">Remover</button></li>`).join("")}</ul>`;
+}
+
+function splitSheetEntries(text) {
+  return String(text || "")
+    .split(/\n+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function selectedSheetCatalogEntries(sheet) {
+  const role = catalog.origins.find((item) => normalizeKey(item.name) === normalizeKey(sheet.role));
+  const klass = catalog.classes.find((item) => normalizeKey(item.name) === normalizeKey(sheet.className));
+  const path = catalog.paths.find((item) => normalizeKey(item.name) === normalizeKey(sheet.pathName));
+  return [
+    role ? { ...role, type: "Origem escolhida", auto: true } : null,
+    role?.talent ? { name: role.talent, type: "Talento de origem", origin: role.name, desc: `Talento concedido pela origem ${role.name}. Pericias da origem: ${role.skills || "-"}.`, auto: true } : null,
+    klass ? { ...klass, type: "Classe escolhida", desc: `${klass.desc || ""} ${classResourceFormula(sheet)}`, auto: true } : null,
+    path ? { ...path, type: "Trilha escolhida", auto: true } : null
+  ].filter(Boolean);
+}
+
+function abilityEntriesForSheet(sheet) {
+  const manual = splitSheetEntries(sheet.abilities).map((line, index) => ({ ...entryFromSavedLine(line, catalog.abilities), manual: true, index }));
+  const automatic = selectedSheetCatalogEntries(sheet)
+    .concat(catalogForField("abilities").map((entry) => ({ ...entry, auto: true })));
+  return mergeCatalogEntries(automatic.concat(manual));
+}
+
+function ritualEntriesForSheet(sheet) {
+  const manual = splitSheetEntries(sheet.rituals).map((line, index) => ({ ...entryFromSavedLine(line, catalog.rituals), manual: true, index }));
+  return mergeCatalogEntries(manual);
+}
+
+function mergeCatalogEntries(entries) {
+  const seen = new Set();
+  return entries.filter((entry) => {
+    const key = `${normalizeKey(entry.type)}:${normalizeKey(entry.name)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function entryFromSavedLine(line, source) {
+  const name = String(line || "").split("|")[0].split(" - ")[0].trim();
+  const found = source.find((entry) => normalizeKey(entry.name) === normalizeKey(name));
+  return found ? { ...found, savedLine: line } : { name: name || "Registro", type: "Manual", desc: line, savedLine: line };
+}
+
+function renderAbilityPanel(sheet) {
+  const entries = abilityEntriesForSheet(sheet);
+  if (!entries.length) return `<ul class="paper-lines"><li class="paper-line-empty">Nenhum talento cadastrado</li></ul>`;
+  return `<div class="sheet-info-cards">${entries.map((entry) => renderSheetInfoCard(entry, "abilities")).join("")}</div>`;
+}
+
+function renderRitualPanel(sheet) {
+  if (!canUseRituals(sheet)) {
+    return `<p class="paper-line-empty">Esta ficha ainda nao possui acesso a rituais.</p>`;
+  }
+  const entries = ritualEntriesForSheet(sheet);
+  if (!entries.length) return `<p class="paper-line-empty">Nenhum ritual cadastrado. Use Adicionar para escolher rituais liberados pelo NEX.</p>`;
+  return `<div class="sheet-info-cards">${entries.map((entry) => renderSheetInfoCard(entry, "rituals")).join("")}</div>`;
+}
+
+function renderSheetInfoCard(entry, field) {
+  const meta = catalogMeta(entry).filter(Boolean);
+  return `
+    <article class="sheet-info-card">
+      <div>
+        <b>${escapeHtml(entry.name)}</b>
+        <small>${escapeHtml(entry.type || "Registro")}</small>
+      </div>
+      <p>${escapeHtml(entry.desc || entry.savedLine || "Sem descricao cadastrada.")}</p>
+      ${meta.length ? `<dl>${meta.map((item) => {
+        const [label, ...valueParts] = item.split(":");
+        return `<div><dt>${escapeHtml(label.trim())}</dt><dd>${escapeHtml(valueParts.join(":").trim() || "-")}</dd></div>`;
+      }).join("")}</dl>` : ""}
+      ${entry.manual ? `<button type="button" data-remove-line="${escapeAttr(field)}" data-index="${entry.index}">Remover</button>` : ""}
+    </article>
+  `;
 }
 
 function parseInventoryItem(raw) {
@@ -3894,57 +4285,10 @@ function matchesSheetChoice(entry, sheet) {
   return Boolean(entryPath || entryClass || entryOrigin);
 }
 
-function nexSpecificEntries(sheet, nex) {
-  const entries = [];
-  if (Number(nex) === 5) {
-    const origin = catalog.origins.find((item) => normalizeKey(item.name) === normalizeKey(sheet.role));
-    const klass = catalog.classes.find((item) => normalizeKey(item.name) === normalizeKey(sheet.className));
-    const path = catalog.paths.find((item) => normalizeKey(item.name) === normalizeKey(sheet.pathName));
-    if (origin) entries.push({ title: `Origem: ${origin.name}`, text: `Pericias: ${origin.skills || "-"}. Talento: ${origin.talent || "-"}. ${origin.desc || ""}` });
-    if (klass) entries.push({ title: `Classe: ${klass.name}`, text: `${klass.desc || ""} ${classResourceFormula(sheet)}` });
-    if (path) entries.push({ title: `Trilha: ${path.name}`, text: path.desc || "Especializacao escolhida para esta classe." });
-  }
-  catalog.abilities
-    .filter((entry) => Number(entry.nex || 5) === Number(nex) && matchesSheetChoice(entry, sheet))
-    .forEach((entry) => entries.push({
-      title: `${entry.type}: ${entry.name}`,
-      text: [
-        entry.desc || "",
-        entry.className ? `Classe: ${entry.className}.` : "",
-        entry.pathName ? `Trilha: ${entry.pathName}.` : "",
-        entry.origin ? `Origem: ${entry.origin}.` : ""
-      ].filter(Boolean).join(" ")
-    }));
-  if (canUseRituals(sheet)) {
-    catalog.rituals
-      .filter((entry) => ritualNexRequirement(entry.circle || 1) === Number(nex))
-      .forEach((entry) => {
-        const stats = catalogStats[entry.name] || {};
-        entries.push({
-          title: `Ritual liberado: ${entry.name}`,
-          text: `Circulo ${entry.circle || 1}. Custo: ${stats.cost || "-"}. Dano/Efeito: ${stats.damage || "-"}. Requisito: ${stats.requirement || "-"}.`
-        });
-      });
-  }
-  return entries;
-}
-
-function nexSpecificHtml(sheet, step) {
-  const entries = nexSpecificEntries(sheet, step.nex);
-  if (!entries.length) {
-    return `<p class="nex-empty">Nenhuma habilidade especifica de origem, classe ou trilha registrada para este marco. Use o Catalogo para adicionar poderes liberados pela mesa.</p>`;
-  }
-  return `<div class="nex-specific-list">${entries.map((entry) => `
-    <article>
-      <b>${escapeHtml(entry.title)}</b>
-      <span>${escapeHtml(entry.text)}</span>
-    </article>
-  `).join("")}</div>`;
-}
-
 function renderNexProgress(sheet) {
   const step = currentNexStep(sheet);
   const next = nextNexStep(step);
+  const cleanGains = nexCleanGains(step);
   return `
     <section class="nex-progress-panel">
       <b>Progressao de NEX</b>
@@ -3953,13 +4297,16 @@ function renderNexProgress(sheet) {
         <strong>${step.nex}%</strong>
         <div>
           <span>${escapeHtml(nexResourceLine(sheet, step))}</span>
-          <small>${step.gains.map(escapeHtml).join(" | ")}</small>
+          ${cleanGains.length ? `<small>${cleanGains.map(escapeHtml).join(" | ")}</small>` : ""}
         </div>
       </div>
-      ${nexSpecificHtml(sheet, step)}
       ${next ? `<p class="nex-next"><b>Proximo marco ${next.nex}%:</b> ${escapeHtml(nexResourceLine(sheet, next))}</p>` : ""}
     </section>
   `;
+}
+
+function nexCleanGains(step) {
+  return (step.gains || []).filter((gain) => !/(origem|classe|trilha|habilidade|poder|ritual|catalogo|conjurador)/i.test(gain));
 }
 
 function showNexUpdateMessage(sheet, previousNex, nextNex) {
@@ -3972,7 +4319,7 @@ function showNexUpdateMessage(sheet, previousNex, nextNex) {
     <div>
       <b>${escapeHtml(sheet.name || "Agente")} evoluiu para ${nextNex}% NEX</b>
       <p>${escapeHtml(classResourceFormula(sheet))}</p>
-      ${gains.map((step) => `<p><strong>${step.nex}%</strong><br>${escapeHtml(nexResourceLine(sheet, step))}<br>${step.gains.map(escapeHtml).join(" | ")}${nexSpecificEntries(sheet, step.nex).length ? `<br>${nexSpecificEntries(sheet, step.nex).map((entry) => `${escapeHtml(entry.title)}: ${escapeHtml(entry.text)}`).join("<br>")}` : ""}</p>`).join("")}
+      ${gains.map((step) => `<p><strong>${step.nex}%</strong><br>${escapeHtml(nexResourceLine(sheet, step))}${nexCleanGains(step).length ? `<br>${nexCleanGains(step).map(escapeHtml).join(" | ")}` : ""}</p>`).join("")}
       <button type="button">Entendido</button>
     </div>
   `;
@@ -4014,11 +4361,12 @@ function emptyCatalogText(field) {
 
 function removeSheetLine(field, index) {
   const sheet = ensureActiveSheet();
-  const lines = splitLines(sheet[field]);
+  const lines = ["abilities", "rituals"].includes(field) ? splitSheetEntries(sheet[field]) : splitLines(sheet[field]);
   lines.splice(index, 1);
   sheet[field] = lines.join("\n");
   recalculateDerivedStats(sheet);
-  renderAll();
+  localOnlyRender();
+  queueSheetPatch(sheet, field, 800);
 }
 
 function classBaseStats(sheet) {
@@ -4163,12 +4511,21 @@ function updateActiveSheet(field, value, numeric = false, rerender = true) {
     syncSheetToken(sheet);
   }
   if (rerender) {
-    renderAll();
+    localOnlyRender();
     if (field === "nex") {
       const nextNex = parseNex(sheet.nex);
       if (nextNex > previousNex) showNexUpdateMessage(sheet, previousNex, nextNex);
     }
-  } else save();
+  } else {
+    suppressOnlineSave = true;
+    save();
+    suppressOnlineSave = false;
+  }
+  queueSheetPatch(sheet, field, 800);
+  const token = state.tokens.find((item) => item.sheetId === sheet.id);
+  if (token && ["portrait", "name", "className", "hp", "hpMax", "pe", "peMax", "san", "sanMax", "inventory"].includes(field)) {
+    markGridChanged(token, "full");
+  }
 }
 
 function syncSheetToken(sheet = ensureActiveSheet()) {
@@ -4221,8 +4578,10 @@ function applySheetDamage(sheetId, amount, mode = "damage") {
   const finalDamage = mode === "damage" ? Math.max(0, value - protection) : value;
   sheet.hp = mode === "heal" ? Math.min(max, current + value) : Math.max(0, current - finalDamage);
   syncSheetToken(sheet);
-  renderAll();
-  markGridChanged();
+  localOnlyRender();
+  queueSheetPatch(sheet, "hp", 500);
+  const token = state.tokens.find((item) => item.sheetId === sheet.id);
+  if (token) markGridChanged(token, "full");
   animateTokenImpactForSheet(sheet.id, mode, mode === "damage" ? finalDamage : value);
 }
 
@@ -4239,8 +4598,8 @@ function applyTokenDamage(tokenId, amount, mode = "damage") {
   const current = Math.max(0, Number(token.hp) || 0);
   token.hp = mode === "heal" ? Math.min(max, current + value) : Math.max(0, current - value);
   syncCurrentSession();
-  renderAll();
-  markGridChanged();
+  localOnlyRender();
+  markGridChanged(token, "full");
   animateTokenImpact(token.id, mode, value);
 }
 
@@ -4280,14 +4639,20 @@ function updateSkillMod(skill, field, value, rerender = true) {
   sheet.skillMods = sheet.skillMods || {};
   sheet.skillMods[skill] = { ...(sheet.skillMods[skill] || {}), [field]: value };
   recalculateDerivedStats(sheet, "skills");
-  if (rerender) renderAll();
-  else save();
+  if (rerender) localOnlyRender();
+  else {
+    suppressOnlineSave = true;
+    save();
+    suppressOnlineSave = false;
+  }
+  queueSheetPatch(sheet, "skillMods", 800);
 }
 
 function adjustSheetNumber(field, delta) {
   const sheet = ensureActiveSheet();
   sheet[field] = numberOr(sheet[field], 0) + delta;
-  renderAll();
+  localOnlyRender();
+  queueSheetPatch(sheet, field, 500);
 }
 
 function addSheetLine(field) {
@@ -4300,9 +4665,11 @@ function addSheetLine(field) {
   const value = window.prompt("Adicionar:", label);
   if (!value) return;
   const sheet = ensureActiveSheet();
-  sheet[field] = splitLines(sheet[field]).concat(value).join("\n");
+  const lines = ["abilities", "rituals"].includes(field) ? splitSheetEntries(sheet[field]) : splitLines(sheet[field]);
+  sheet[field] = lines.concat(value).join("\n");
   if (["inventory", "abilities", "rituals"].includes(field)) recalculateDerivedStats(sheet, field);
-  renderAll();
+  localOnlyRender();
+  queueSheetPatch(sheet, field, 800);
 }
 
 function rollSkill(skillName) {
@@ -4778,7 +5145,8 @@ function saveSheet(event) {
   }
   state.activeSheetId = sheet.id;
   clearSheetForm();
-  renderAll();
+  localOnlyRender();
+  queueSheetPatch(sheet, "full", 200);
 }
 
 function normalizeSheet(sheet) {
@@ -5144,6 +5512,7 @@ async function saveCurrentFile() {
 
 function showLogin() {
   stopGridSync();
+  stopRealtimeSync();
   document.querySelector("#loginScreen")?.classList.remove("hidden");
   document.querySelector("#portalScreen")?.classList.add("hidden");
   document.querySelector("#appShell")?.classList.add("hidden");
@@ -5152,6 +5521,7 @@ function showLogin() {
 
 function showPortal() {
   stopGridSync();
+  stopRealtimeSync();
   document.querySelector("#loginScreen")?.classList.add("hidden");
   document.querySelector("#portalScreen")?.classList.remove("hidden");
   document.querySelector("#appShell")?.classList.add("hidden");

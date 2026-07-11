@@ -1493,6 +1493,71 @@ label {
   font-size: .58rem;
 }
 
+.sheet-info-cards {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.sheet-info-card {
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid rgba(75, 58, 43, .42);
+  background: rgba(255, 248, 225, .38);
+}
+
+.sheet-info-card > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: baseline;
+  border-bottom: 1px solid rgba(75, 58, 43, .3);
+  padding-bottom: 4px;
+}
+
+.sheet-info-card b {
+  font-size: .92rem;
+  text-transform: uppercase;
+}
+
+.sheet-info-card small {
+  color: #5b4938;
+  font-weight: 900;
+}
+
+.sheet-info-card p {
+  margin: 0;
+  font-size: .78rem;
+  line-height: 1.45;
+}
+
+.sheet-info-card dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 5px 10px;
+  margin: 0;
+  font-size: .68rem;
+}
+
+.sheet-info-card dl div {
+  display: grid;
+  gap: 1px;
+}
+
+.sheet-info-card dt {
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.sheet-info-card dd {
+  margin: 0;
+}
+
+.sheet-info-card button {
+  justify-self: start;
+}
+
 .paper-line-empty {
   display: list-item !important;
   color: #5a4d3e;

@@ -78,6 +78,26 @@ create table if not exists public.rolagens (
   created_at timestamptz default now()
 );
 
+create table if not exists public.grid_tokens (
+  id uuid primary key default gen_random_uuid(),
+  campanha_id uuid not null,
+  cena_id text not null,
+  personagem_id uuid,
+  nome text,
+  imagem_url text,
+  x integer default 0,
+  y integer default 0,
+  largura numeric default 1,
+  altura numeric default 1,
+  rotacao numeric default 0,
+  visivel boolean default true,
+  bloqueado boolean default false,
+  updated_by uuid,
+  payload jsonb default '{}'::jsonb,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
 alter table public.campanhas add column if not exists owner_id uuid;
 alter table public.campanhas add column if not exists mestre_id uuid;
 alter table public.campanhas add column if not exists nome text;
@@ -129,3 +149,42 @@ alter table public.rolagens add column if not exists formula text;
 alter table public.rolagens add column if not exists resultado text;
 alter table public.rolagens add column if not exists payload jsonb default '{}'::jsonb;
 alter table public.rolagens add column if not exists created_at timestamptz default now();
+
+alter table public.grid_tokens add column if not exists campanha_id uuid;
+alter table public.grid_tokens add column if not exists cena_id text;
+alter table public.grid_tokens add column if not exists personagem_id uuid;
+alter table public.grid_tokens add column if not exists nome text;
+alter table public.grid_tokens add column if not exists imagem_url text;
+alter table public.grid_tokens add column if not exists x integer default 0;
+alter table public.grid_tokens add column if not exists y integer default 0;
+alter table public.grid_tokens add column if not exists largura numeric default 1;
+alter table public.grid_tokens add column if not exists altura numeric default 1;
+alter table public.grid_tokens add column if not exists rotacao numeric default 0;
+alter table public.grid_tokens add column if not exists visivel boolean default true;
+alter table public.grid_tokens add column if not exists bloqueado boolean default false;
+alter table public.grid_tokens add column if not exists updated_by uuid;
+alter table public.grid_tokens add column if not exists payload jsonb default '{}'::jsonb;
+alter table public.grid_tokens add column if not exists created_at timestamptz default now();
+alter table public.grid_tokens add column if not exists updated_at timestamptz default now();
+
+create index if not exists grid_tokens_campanha_cena_idx on public.grid_tokens (campanha_id, cena_id);
+create index if not exists grid_tokens_personagem_idx on public.grid_tokens (personagem_id);
+
+alter table public.grid_tokens replica identity full;
+alter table public.personagens replica identity full;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'grid_tokens'
+  ) then
+    alter publication supabase_realtime add table public.grid_tokens;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'personagens'
+  ) then
+    alter publication supabase_realtime add table public.personagens;
+  end if;
+end $$;
