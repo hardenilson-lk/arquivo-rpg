@@ -6,8 +6,9 @@ create extension if not exists "pgcrypto";
 create table if not exists public.usuarios (
   id uuid primary key,
   username text unique not null,
-  email text unique not null,
+  email text unique,
   role text default 'player',
+  password_hash text,
   sheet_ids uuid[] default '{}',
   campaign_ids uuid[] default '{}',
   payload jsonb default '{}'::jsonb,
@@ -34,6 +35,11 @@ create table if not exists public.personagens (
   user_id uuid,
   campanha_id uuid,
   nome text,
+  jogador text,
+  atributos jsonb default '{}'::jsonb,
+  pericias jsonb default '{}'::jsonb,
+  vida jsonb default '{}'::jsonb,
+  sanidade jsonb default '{}'::jsonb,
   payload jsonb default '{}'::jsonb,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
@@ -83,9 +89,19 @@ alter table public.campanhas add column if not exists payload jsonb default '{}'
 alter table public.campanhas add column if not exists created_at timestamptz default now();
 alter table public.campanhas add column if not exists updated_at timestamptz default now();
 
+alter table public.usuarios alter column email drop not null;
+alter table public.usuarios add column if not exists password_hash text;
+alter table public.usuarios add column if not exists sheet_ids uuid[] default '{}';
+alter table public.usuarios add column if not exists campaign_ids uuid[] default '{}';
+
 alter table public.personagens add column if not exists user_id uuid;
 alter table public.personagens add column if not exists campanha_id uuid;
 alter table public.personagens add column if not exists nome text;
+alter table public.personagens add column if not exists jogador text;
+alter table public.personagens add column if not exists atributos jsonb default '{}'::jsonb;
+alter table public.personagens add column if not exists pericias jsonb default '{}'::jsonb;
+alter table public.personagens add column if not exists vida jsonb default '{}'::jsonb;
+alter table public.personagens add column if not exists sanidade jsonb default '{}'::jsonb;
 alter table public.personagens add column if not exists payload jsonb default '{}'::jsonb;
 alter table public.personagens add column if not exists created_at timestamptz default now();
 alter table public.personagens add column if not exists updated_at timestamptz default now();

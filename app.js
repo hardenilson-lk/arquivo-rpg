@@ -25,6 +25,8 @@ let panState = null;
 let mapPlayerPreview = false;
 let diceClearTimer = null;
 let masterInventorySheetId = null;
+const LEGACY_STORAGE_KEY = "mesa-arcana";
+const SESSION_STORAGE_KEY = "arquivo-rpg-session";
 
 const els = {
   battlefield: document.querySelector("#battlefield"),
@@ -363,14 +365,90 @@ catalog.rituals.forEach((entry) => {
   entry.nex = ritualNexRequirement(entry.circle);
 });
 
+function readJsonStorage(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch (error) {
+    console.warn(`[Storage] Nao consegui ler ${key}.`, error);
+    return null;
+  }
+}
+
+function safeSetLocalStorage(key, value) {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch (error) {
+    console.warn(`[Storage] Falha ao salvar ${key}.`, error);
+    if (error?.name === "QuotaExceededError" || String(error?.message || "").toLowerCase().includes("quota")) {
+      try {
+        localStorage.removeItem(LEGACY_STORAGE_KEY);
+        localStorage.setItem(key, value);
+        setSyncStatus("LocalStorage cheio. Limpei o arquivo local antigo e mantive a sessao leve.", true);
+        return true;
+      } catch (retryError) {
+        console.warn("[Storage] Mesmo depois da limpeza nao foi possivel salvar a sessao leve.", retryError);
+      }
+    }
+    return false;
+  }
+}
+
+function lightLocalState() {
+  const user = currentUser();
+  return {
+    user_id: state.currentUserId || "",
+    username: user?.username || "",
+    email: user?.email || "",
+    role: user?.role || "player",
+    sheet_ids: user?.sheetIds || [],
+    campaign_ids: user?.campaignIds || [],
+    active_campaign_id: state.activeCampaignId || "",
+    active_character_id: state.activeSheetId || "",
+    active_session_id: state.activeSessionId || "",
+    active_tab: state.activeTab || "mesa",
+    current_mode: state.currentMode || "player",
+    saved_at: new Date().toISOString()
+  };
+}
+
+function saveLightSession() {
+  safeSetLocalStorage(SESSION_STORAGE_KEY, JSON.stringify(lightLocalState()));
+}
+
+function applyLightSession(session) {
+  if (!session || typeof session !== "object") return;
+  state.currentUserId = session.user_id || state.currentUserId;
+  state.activeCampaignId = session.active_campaign_id || state.activeCampaignId;
+  state.activeSheetId = session.active_character_id || state.activeSheetId;
+  state.activeSessionId = session.active_session_id || state.activeSessionId;
+  state.activeTab = session.active_tab || state.activeTab;
+  state.currentMode = session.current_mode || state.currentMode;
+  if (session.user_id && !state.accounts.some((account) => account.id === session.user_id)) {
+    state.accounts.push({
+      id: session.user_id,
+      username: session.username || "agente",
+      email: session.email || "",
+      role: session.role || "player",
+      sheetIds: session.sheet_ids || [],
+      campaignIds: session.campaign_ids || [],
+      online: true
+    });
+  }
+}
+
 function load() {
-  const saved = localStorage.getItem("mesa-arcana");
-  if (saved) {
-    Object.assign(state, JSON.parse(saved));
+  const legacy = readJsonStorage(LEGACY_STORAGE_KEY);
+  const session = readJsonStorage(SESSION_STORAGE_KEY);
+  if (legacy && (legacy.sheets || legacy.campaigns || legacy.accounts)) {
+    Object.assign(state, legacy);
+    state.hasLegacyLocalState = true;
   } else {
     state.tokens = [];
     state.sheets = [];
   }
+  applyLightSession(session);
   state.currentMode = state.currentMode || "player";
   state.activeTab = state.activeTab || "mesa";
   state.archiveName = state.archiveName || "arquivos";
@@ -625,6 +703,37 @@ function mergeUnique(values = []) {
   return Array.from(new Set(values.filter(Boolean)));
 }
 
+async function hashPassword(password) {
+  const text = String(password || "");
+  if (!text) return "";
+  if (window.crypto?.subtle) {
+    const bytes = new TextEncoder().encode(text);
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  }
+  return btoa(unescape(encodeURIComponent(text)));
+}
+
+function userFromRow(row) {
+  if (!row) return null;
+  const payload = row.payload || {};
+  return {
+    id: row.id || payload.id || crypto.randomUUID(),
+    username: row.username || payload.username || row.email?.split("@")[0] || "agente",
+    email: row.email || payload.email || "",
+    role: row.role || payload.role || "player",
+    sheetIds: row.sheet_ids || payload.sheetIds || payload.sheet_ids || [],
+    campaignIds: row.campaign_ids || payload.campaignIds || payload.campaign_ids || [],
+    passwordHash: row.password_hash || payload.password_hash || payload.passwordHash || "",
+    online: true
+  };
+}
+
+function isMissingColumnError(error) {
+  const text = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`.toLowerCase();
+  return text.includes("column") || text.includes("schema cache") || text.includes("could not find");
+}
+
 function upsertLocalAccount(account) {
   const safeAccount = {
     id: account.id,
@@ -634,6 +743,7 @@ function upsertLocalAccount(account) {
     role: account.role || "player",
     sheetIds: Array.isArray(account.sheetIds) ? account.sheetIds : [],
     campaignIds: Array.isArray(account.campaignIds) ? account.campaignIds : [],
+    passwordHash: account.passwordHash || account.password_hash || "",
     online: account.online === true
   };
   const existing = state.accounts.findIndex((item) => item.id === safeAccount.id || item.email?.toLowerCase() === safeAccount.email.toLowerCase());
@@ -682,6 +792,7 @@ async function safeSelect(table, columns = "*") {
   const client = supabaseClient();
   const { data, error } = await client.from(table).select(columns);
   if (error) {
+    console.error("[Supabase] Erro Supabase", { table, columns, error });
     setSyncStatus(`Nao consegui ler ${table}: ${remoteErrorMessage(error)}`, true);
     return [];
   }
@@ -699,32 +810,32 @@ async function createAccountOnline(username, email, password, confirmPassword = 
   const client = supabaseClient();
   if (!client) throw new Error("Supabase nao carregou. O acesso sera apenas local.");
 
-  setSyncStatus("Criando acesso online...");
-  const existingUsers = await safeSelect("usuarios", "id, username, email");
-  if (existingUsers.some((account) => account.username?.toLowerCase() === cleanUser.toLowerCase())) throw new Error("Esse usuario ja existe.");
-  if (existingUsers.some((account) => account.email?.toLowerCase() === cleanEmail)) throw new Error("Esse email ja esta cadastrado.");
-
-  const { data, error } = await client.auth.signUp({
-    email: cleanEmail,
-    password,
-    options: { data: { username: cleanUser } }
-  });
-  if (error) throw new Error(remoteErrorMessage(error));
-  const userId = data.user?.id || crypto.randomUUID();
+  console.log("[Supabase] Criando usuario no Supabase", { username: cleanUser, email: cleanEmail });
+  setSyncStatus("Criando usuario no Supabase...");
+  const existingUsers = await safeSelect("usuarios", "*");
+  const existingRow = existingUsers.find((account) =>
+    account.username?.toLowerCase() === cleanUser.toLowerCase() ||
+    account.email?.toLowerCase() === cleanEmail
+  );
+  const passwordHash = await hashPassword(password);
+  const userId = existingRow?.id || crypto.randomUUID();
   const accountData = {
     id: userId,
-    username: cleanUser,
-    email: cleanEmail,
-    role: "player",
-    sheetIds: [],
-    campaignIds: [],
+    username: existingRow?.username || cleanUser,
+    email: existingRow?.email || cleanEmail,
+    role: existingRow?.role || existingRow?.payload?.role || "player",
+    sheetIds: existingRow?.sheet_ids || existingRow?.payload?.sheetIds || [],
+    campaignIds: existingRow?.campaign_ids || existingRow?.payload?.campaignIds || [],
+    passwordHash,
     online: true
   };
   await saveOnlineUser(accountData);
   const account = upsertLocalAccount(accountData);
   state.currentUserId = account.id;
+  console.log(existingRow ? "[Supabase] Usuario carregado do Supabase" : "[Supabase] Usuario criado no Supabase", account);
+  await migrateLocalWorkspaceToSupabase(account);
   await loadOnlineWorkspace();
-  setSyncStatus("Acesso online criado.");
+  setSyncStatus(existingRow ? "Acesso existente carregado." : "Acesso online criado.");
   return account;
 }
 
@@ -732,33 +843,26 @@ async function loginAccountOnline(username, password) {
   const identifier = username.trim();
   const client = supabaseClient();
   if (!client) throw new Error("Supabase nao carregou.");
-  setSyncStatus("Entrando online...");
-  let email = identifier;
-  let usernameLabel = identifier;
-  if (!isValidEmail(identifier)) {
-    const { data, error } = await client.from("usuarios").select("*").ilike("username", identifier).limit(1);
-    if (error) throw new Error(remoteErrorMessage(error));
-    const userRow = data?.[0];
-    if (!userRow?.email) throw new Error("Usuario nao encontrado no Supabase.");
-    email = userRow.email;
-    usernameLabel = userRow.username || identifier;
+  if (!identifier || !password) throw new Error("Informe usuario/email e senha.");
+  console.log("[Supabase] Buscando usuario para login", { identifier });
+  setSyncStatus("Entrando pelo Supabase...");
+  const users = await safeSelect("usuarios", "*");
+  const userRow = users.find((row) =>
+    row.username?.toLowerCase() === identifier.toLowerCase() ||
+    row.email?.toLowerCase() === identifier.toLowerCase()
+  );
+  if (!userRow) throw new Error("Usuario nao encontrado no Supabase.");
+  const accountData = userFromRow(userRow);
+  const passwordHash = await hashPassword(password);
+  if (accountData.passwordHash && accountData.passwordHash !== passwordHash) throw new Error("Senha incorreta.");
+  if (!accountData.passwordHash) {
+    accountData.passwordHash = passwordHash;
+    await saveOnlineUser(accountData);
   }
-
-  const { data, error } = await client.auth.signInWithPassword({ email, password });
-  if (error) throw new Error(remoteErrorMessage(error));
-  const authUser = data.user;
-  const userRows = await safeSelect("usuarios", "*");
-  const userRow = userRows.find((row) => row.id === authUser.id || row.email?.toLowerCase() === email.toLowerCase());
-  const account = upsertLocalAccount({
-    id: authUser.id,
-    username: userRow?.username || authUser.user_metadata?.username || usernameLabel,
-    email: authUser.email || email,
-    role: userRow?.role || userRow?.payload?.role || "player",
-    sheetIds: userRow?.sheet_ids || userRow?.payload?.sheetIds || [],
-    campaignIds: userRow?.campaign_ids || userRow?.payload?.campaignIds || [],
-    online: true
-  });
+  const account = upsertLocalAccount(accountData);
   state.currentUserId = account.id;
+  console.log("[Supabase] Usuario carregado do Supabase", account);
+  await migrateLocalWorkspaceToSupabase(account);
   await loadOnlineWorkspace();
   setSyncStatus("Dados online carregados.");
   return account;
@@ -767,6 +871,7 @@ async function loginAccountOnline(username, password) {
 async function saveOnlineUser(user = currentUser()) {
   const client = supabaseClient();
   if (!client || !user || user.id === "admin-master") return;
+  const now = new Date().toISOString();
   const payload = {
     id: user.id,
     username: user.username,
@@ -774,11 +879,25 @@ async function saveOnlineUser(user = currentUser()) {
     role: user.role || "player",
     sheet_ids: user.sheetIds || [],
     campaign_ids: user.campaignIds || [],
-    payload: user,
-    updated_at: new Date().toISOString()
+    password_hash: user.passwordHash || user.password_hash || "",
+    payload: {
+      ...user,
+      password_hash: user.passwordHash || user.password_hash || ""
+    },
+    updated_at: now
   };
   const { error } = await client.from("usuarios").upsert(payload, { onConflict: "id" });
-  if (error) throw new Error(`usuarios: ${remoteErrorMessage(error)}`);
+  if (!error) return;
+  if (isMissingColumnError(error)) {
+    const fallback = { ...payload };
+    delete fallback.password_hash;
+    const retry = await client.from("usuarios").upsert(fallback, { onConflict: "id" });
+    if (!retry.error) return;
+    console.error("[Supabase] Erro Supabase", { table: "usuarios", payload: fallback, error: retry.error });
+    throw new Error(`usuarios: ${remoteErrorMessage(retry.error)}`);
+  }
+  console.error("[Supabase] Erro Supabase", { table: "usuarios", payload, error });
+  throw new Error(`usuarios: ${remoteErrorMessage(error)}`);
 }
 
 async function loadOnlineWorkspace() {
@@ -797,10 +916,15 @@ async function loadOnlineWorkspace() {
     ]);
 
     const remoteCampaigns = campaignRows
-      .map((row) => normalizeCampaignRecord({ ...(row.payload || {}), ...row }))
+      .map((row) => normalizeCampaignRecord({ ...(row.payload || {}), ...row, id: row.id }))
       .filter((campaign) => campaign.mestreId === user.id || campaign.jogadores.includes(user.id) || (user.campaignIds || []).includes(campaign.id) || user.role === "admin");
     const remoteSheets = sheetRows
-      .map((row) => normalizeSheet(row.payload || row))
+      .map((row) => normalizeSheet({
+        ...(row.payload || {}),
+        id: row.id,
+        name: row.payload?.name || row.nome || "",
+        player: row.payload?.player || row.jogador || user.username || "Jogador"
+      }))
       .filter((sheet) => sheet.player === user.username || (user.sheetIds || []).includes(sheet.id) || sheetRows.some((row) => row.id === sheet.id && row.user_id === user.id));
 
     state.campaigns = mergeById(state.campaigns, remoteCampaigns).map(normalizeCampaignRecord);
@@ -833,7 +957,7 @@ async function loadOnlineWorkspace() {
     const campaign = currentCampaign();
     if (campaign && !state.activeSessionId) state.activeSessionId = campaign.sessoes[0]?.id || null;
     syncCurrentSession();
-    localStorage.setItem("mesa-arcana", JSON.stringify(state));
+    saveLightSession();
   } finally {
     onlineLoadRunning = false;
   }
@@ -861,6 +985,215 @@ function userSheetsForSave(user) {
   return state.sheets.filter((sheet) => (user.sheetIds || []).includes(sheet.id));
 }
 
+function campaignPayloadForSave(campaign) {
+  const payload = normalizeCampaignRecord(campaign);
+  payload.codigo_convite = payload.codigoConvite || payload.inviteCode;
+  payload.invite_code = payload.inviteCode || payload.codigoConvite;
+  payload.inviteCode = payload.inviteCode || payload.codigoConvite;
+  return payload;
+}
+
+function campaignDatabaseRow(campaign, now = new Date().toISOString()) {
+  const payload = campaignPayloadForSave(campaign);
+  return {
+    id: campaign.id,
+    owner_id: campaign.mestreId,
+    mestre_id: campaign.mestreId,
+    nome: campaign.nome,
+    invite_code: payload.invite_code,
+    codigo_convite: payload.codigo_convite,
+    objetivo_atual: currentSession()?.mission || campaign.sessoes?.[0]?.mission || "",
+    local_atual: state.map?.name || "",
+    payload,
+    updated_at: now
+  };
+}
+
+function sheetCampaignId(sheetId) {
+  return state.campaigns.find((campaign) => (campaign.personagens || []).includes(sheetId))?.id || null;
+}
+
+function sheetDatabaseRow(sheet, user, now = new Date().toISOString()) {
+  const safeSheet = normalizeSheet(sheet);
+  return {
+    id: safeSheet.id,
+    user_id: user.id,
+    campanha_id: sheetCampaignId(safeSheet.id),
+    nome: safeSheet.name || "Agente",
+    jogador: safeSheet.player || user.username || "",
+    atributos: {
+      agi: safeSheet.agi,
+      for: safeSheet.str,
+      int: safeSheet.int,
+      pre: safeSheet.pre,
+      vig: safeSheet.vig
+    },
+    pericias: {
+      text: safeSheet.skills || "",
+      mods: safeSheet.skillMods || {}
+    },
+    vida: {
+      atual: safeSheet.hp,
+      max: safeSheet.hpMax,
+      pe: safeSheet.pe,
+      peMax: safeSheet.peMax
+    },
+    sanidade: {
+      atual: safeSheet.san,
+      max: safeSheet.sanMax
+    },
+    payload: safeSheet,
+    updated_at: now
+  };
+}
+
+function minimalSheetDatabaseRow(row) {
+  return {
+    id: row.id,
+    user_id: row.user_id,
+    campanha_id: row.campanha_id,
+    nome: row.nome,
+    payload: row.payload,
+    updated_at: row.updated_at
+  };
+}
+
+async function upsertSheetsOnline(rows) {
+  const client = supabaseClient();
+  if (!client || !rows.length) return;
+  const { error } = await client.from("personagens").upsert(rows, { onConflict: "id" });
+  if (!error) {
+    console.log("[Supabase] Ficha criada/atualizada no Supabase", rows.map((row) => row.id));
+    return;
+  }
+  if (isMissingColumnError(error)) {
+    console.warn("[Supabase] Colunas completas de personagens ausentes. Usando fallback minimo. Rode supabase-migration.sql.", error);
+    const fallback = await client.from("personagens").upsert(rows.map(minimalSheetDatabaseRow), { onConflict: "id" });
+    if (fallback.error) {
+      console.error("[Supabase] Erro Supabase", { table: "personagens", rows: fallback, error: fallback.error });
+      throw new Error(`personagens: ${remoteErrorMessage(fallback.error)}`);
+    }
+    return;
+  }
+  console.error("[Supabase] Erro Supabase", { table: "personagens", rows, error });
+  throw new Error(`personagens: ${remoteErrorMessage(error)}`);
+}
+
+function replaceSheetId(oldId, newId) {
+  if (!oldId || !newId || oldId === newId) return;
+  state.sheets.forEach((sheet) => {
+    if (sheet.id === oldId) sheet.id = newId;
+  });
+  state.accounts.forEach((account) => {
+    account.sheetIds = (account.sheetIds || []).map((id) => id === oldId ? newId : id);
+  });
+  state.campaigns.forEach((campaign) => {
+    campaign.personagens = (campaign.personagens || []).map((id) => id === oldId ? newId : id);
+    campaign.sessoes?.forEach((session) => {
+      (session.tokens || []).forEach((token) => {
+        if (token.sheetId === oldId) token.sheetId = newId;
+      });
+    });
+  });
+  state.tokens.forEach((token) => {
+    if (token.sheetId === oldId) token.sheetId = newId;
+  });
+  if (state.activeSheetId === oldId) state.activeSheetId = newId;
+}
+
+function replaceCampaignId(oldId, newId) {
+  if (!oldId || !newId || oldId === newId) return;
+  state.accounts.forEach((account) => {
+    account.campaignIds = (account.campaignIds || []).map((id) => id === oldId ? newId : id);
+  });
+  state.campaigns.forEach((campaign) => {
+    if (campaign.id === oldId) {
+      campaign.id = newId;
+      campaign.sessoes?.forEach((session) => {
+        session.campaignId = newId;
+      });
+    }
+  });
+  if (state.activeCampaignId === oldId) state.activeCampaignId = newId;
+}
+
+function legacySheetCandidates(user) {
+  const ids = new Set(user.sheetIds || []);
+  const matchingAccounts = state.accounts.filter((account) =>
+    account.id === user.id ||
+    account.username?.toLowerCase() === user.username?.toLowerCase() ||
+    account.email?.toLowerCase() === user.email?.toLowerCase()
+  );
+  matchingAccounts.forEach((account) => (account.sheetIds || []).forEach((id) => ids.add(id)));
+  if (state.activeSheetId) ids.add(state.activeSheetId);
+  const byId = state.sheets.filter((sheet) => ids.has(sheet.id));
+  const byPlayer = state.sheets.filter((sheet) => normalizeKey(sheet.player) === normalizeKey(user.username) || normalizeKey(sheet.player) === "local");
+  return mergeById(byId, byPlayer).map(normalizeSheet);
+}
+
+function legacyCampaignCandidates(user) {
+  const ids = new Set(user.campaignIds || []);
+  if (state.activeCampaignId) ids.add(state.activeCampaignId);
+  const byId = state.campaigns.filter((campaign) => ids.has(campaign.id));
+  const byOwner = state.campaigns.filter((campaign) => campaign.mestreId === user.id || (campaign.jogadores || []).includes(user.id));
+  return mergeById(byId, byOwner.length ? byOwner : state.campaigns).map(normalizeCampaignRecord);
+}
+
+async function migrateLocalWorkspaceToSupabase(user = currentUser()) {
+  const client = supabaseClient();
+  if (!client || !user || user.id === "admin-master" || onlineLoadRunning) return;
+  const now = new Date().toISOString();
+  const localSheets = legacySheetCandidates(user);
+  const localCampaigns = legacyCampaignCandidates(user);
+  if (!localSheets.length && !localCampaigns.length && !state.hasLegacyLocalState) return;
+
+  console.log("[Supabase] Migrando dados locais para Supabase", { sheets: localSheets.length, campaigns: localCampaigns.length });
+  const [remoteSheets, remoteCampaigns] = await Promise.all([
+    safeSelect("personagens", "*"),
+    safeSelect("campanhas", "*")
+  ]);
+
+  for (const campaign of localCampaigns) {
+    const code = normalizeInviteCode(campaign.codigoConvite || campaign.inviteCode);
+    const existing = remoteCampaigns.find((row) => {
+      const payload = row.payload || {};
+      return normalizeInviteCode(row.codigo_convite || row.invite_code || payload.codigo_convite || payload.invite_code || payload.inviteCode) === code;
+    });
+    if (existing?.id) replaceCampaignId(campaign.id, existing.id);
+    const safeCampaign = normalizeCampaignRecord(existing ? { ...(existing.payload || {}), ...campaign, id: existing.id } : campaign);
+    safeCampaign.mestreId = safeCampaign.mestreId || user.id;
+    user.campaignIds = mergeUnique([...(user.campaignIds || []), safeCampaign.id]);
+    console.log(existing ? "[Supabase] Campanha local ja existia no Supabase" : "[Supabase] Campanha criada no Supabase", safeCampaign.nome);
+    const { error } = await client.from("campanhas").upsert(campaignDatabaseRow(safeCampaign, now), { onConflict: "id" });
+    if (error) {
+      console.error("[Supabase] Erro Supabase", { table: "campanhas", campaign: safeCampaign, error });
+      throw new Error(`campanhas: ${remoteErrorMessage(error)}`);
+    }
+  }
+
+  const rows = [];
+  for (const sheet of localSheets) {
+    const existing = remoteSheets.find((row) =>
+      row.user_id === user.id &&
+      normalizeKey(row.nome || row.payload?.name) === normalizeKey(sheet.name)
+    );
+    if (existing?.id) replaceSheetId(sheet.id, existing.id);
+    const migratedSheet = normalizeSheet({ ...(existing?.payload || {}), ...sheet, id: existing?.id || sheet.id, player: user.username });
+    user.sheetIds = mergeUnique([...(user.sheetIds || []), migratedSheet.id]);
+    console.log(existing ? "[Supabase] Ficha local ja existia no Supabase" : "[Supabase] Migrando ficha local para Supabase", migratedSheet.name);
+    rows.push(sheetDatabaseRow(migratedSheet, user, now));
+  }
+  await upsertSheetsOnline(rows);
+  await saveOnlineUser(user);
+  state.hasLegacyLocalState = false;
+  try {
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
+  } catch (error) {
+    console.warn("[Storage] Nao consegui remover estado antigo.", error);
+  }
+  saveLightSession();
+}
+
 function listItemsFromText(text) {
   return String(text || "")
     .split(/\n|,/)
@@ -877,33 +1210,18 @@ async function saveOnlineState() {
     syncCurrentSession();
     await saveOnlineUser(user);
     const now = new Date().toISOString();
-    const campaigns = userCampaignsForSave(user).map((campaign) => ({
-      id: campaign.id,
-      owner_id: campaign.mestreId,
-      mestre_id: campaign.mestreId,
-      nome: campaign.nome,
-      invite_code: campaign.inviteCode,
-      codigo_convite: campaign.codigoConvite || campaign.inviteCode,
-      objetivo_atual: currentSession()?.mission || campaign.sessoes?.[0]?.mission || "",
-      local_atual: state.map?.name || "",
-      payload: normalizeCampaignRecord(campaign),
-      updated_at: now
-    }));
-    const sheets = userSheetsForSave(user).map((sheet) => ({
-      id: sheet.id,
-      user_id: user.id,
-      campanha_id: state.campaigns.find((campaign) => (campaign.personagens || []).includes(sheet.id))?.id || null,
-      nome: sheet.name,
-      payload: normalizeSheet(sheet),
-      updated_at: now
-    }));
+    const campaigns = userCampaignsForSave(user).map((campaign) => campaignDatabaseRow(campaign, now));
+    const sheets = userSheetsForSave(user).map((sheet) => sheetDatabaseRow(sheet, user, now));
     if (campaigns.length) {
       const { error } = await client.from("campanhas").upsert(campaigns, { onConflict: "id" });
-      if (error) throw new Error(`campanhas: ${remoteErrorMessage(error)}`);
+      if (error) {
+        console.error("[Supabase] Erro Supabase", { table: "campanhas", campaigns, error });
+        throw new Error(`campanhas: ${remoteErrorMessage(error)}`);
+      }
+      console.log("[Supabase] Campanha criada no Supabase", campaigns.map((campaign) => campaign.codigo_convite));
     }
     if (sheets.length) {
-      const { error } = await client.from("personagens").upsert(sheets, { onConflict: "id" });
-      if (error) throw new Error(`personagens: ${remoteErrorMessage(error)}`);
+      await upsertSheetsOnline(sheets);
     }
 
     for (const sheet of userSheetsForSave(user)) {
@@ -1026,42 +1344,35 @@ async function findCampaignByInviteOnline(code) {
   const client = supabaseClient();
   const clean = normalizeInviteCode(code);
   if (!client || !clean) return null;
+  console.log("[Supabase] Buscando convite", { digitado: code, normalizado: clean });
   setSyncStatus(`Buscando convite ${clean} no Supabase...`);
 
-  const { data, error } = await client
-    .from("campanhas")
-    .select("*")
-    .or(`codigo_convite.eq.${clean},invite_code.eq.${clean}`)
-    .limit(1);
-  if (error) {
-    console.warn("[Supabase] Busca OR de convite falhou, tentando buscas separadas.", error);
-  } else if (data?.[0]) {
-    return normalizeCampaignRecord({ ...(data[0].payload || {}), ...data[0] });
-  }
-
   const attempts = [
-    ["codigo_convite", clean],
-    ["invite_code", clean],
-    ["codigo_convite", code.trim()],
-    ["invite_code", code.trim()]
+    { label: "codigo_convite/invite_code", query: () => client.from("campanhas").select("*").or(`codigo_convite.eq.${clean},invite_code.eq.${clean}`).limit(1) },
+    { label: "codigo_convite", query: () => client.from("campanhas").select("*").eq("codigo_convite", clean).limit(1) },
+    { label: "invite_code", query: () => client.from("campanhas").select("*").eq("invite_code", clean).limit(1) },
+    { label: "payload", query: () => client.from("campanhas").select("*").or(`payload->>codigo_convite.eq.${clean},payload->>invite_code.eq.${clean},payload->>inviteCode.eq.${clean}`).limit(1) }
   ];
-  for (const [column, value] of attempts) {
-    const { data: rows, error: lookupError } = await client
-      .from("campanhas")
-      .select("*")
-      .eq(column, value)
-      .limit(1);
-    if (lookupError) {
-      console.warn(`[Supabase] Convite por ${column} falhou.`, lookupError);
-      continue;
+  for (const attempt of attempts) {
+    const { data, error } = await attempt.query();
+    console.log("[Supabase] Resultado da busca de convite", { tentativa: attempt.label, data, error });
+    if (error) console.warn("[Supabase] Busca de convite falhou.", { tentativa: attempt.label, error });
+    if (data?.[0]) {
+      console.log("[Supabase] Campanha encontrada", data[0]);
+      return normalizeCampaignRecord({ ...(data[0].payload || {}), ...data[0], id: data[0].id });
     }
-    if (rows?.[0]) return normalizeCampaignRecord({ ...(rows[0].payload || {}), ...rows[0] });
   }
 
   const { data: allRows, error: allError } = await client.from("campanhas").select("*");
+  console.log("[Supabase] Resultado da busca ampla de convite", { codigoDigitado: code, codigoNormalizado: clean, quantidade: allRows?.length || 0, erro: allError });
   if (!allError && Array.isArray(allRows)) {
     const payloadMatch = allRows.find((row) => campaignMatchesInvite({ ...(row.payload || {}), ...row }, clean));
-    if (payloadMatch) return normalizeCampaignRecord({ ...(payloadMatch.payload || {}), ...payloadMatch });
+    if (payloadMatch) {
+      console.log("[Supabase] Campanha encontrada", payloadMatch);
+      return normalizeCampaignRecord({ ...(payloadMatch.payload || {}), ...payloadMatch, id: payloadMatch.id });
+    }
+  } else if (allError) {
+    console.error("[Supabase] Erro Supabase", { table: "campanhas", codigoDigitado: code, codigoNormalizado: clean, error: allError });
   }
 
   setSyncStatus(`Convite ${clean} nao encontrado no Supabase.`, true);
@@ -1158,7 +1469,7 @@ async function refreshActiveCampaignFromSupabase({ rerender = false } = {}) {
   state.campaigns = state.campaigns.map((item) => item.id === campaign.id ? campaign : item);
   seedSessionTokensFromSheets(campaign, currentSession());
   syncCurrentSession();
-  localStorage.setItem("mesa-arcana", JSON.stringify(state));
+  saveLightSession();
   setSyncStatus(`Campanha atualizada: ${linkedSheets.length} ficha(s) vinculada(s).`);
   if (rerender) {
     renderPortal();
@@ -1178,11 +1489,13 @@ async function joinCampaignWithInvite(code) {
     if (onlineCampaign) campaign = upsertLocalCampaign(onlineCampaign);
   }
   if (!campaign) throw new Error("Convite nao encontrado.");
+  console.log("[Supabase] Campanha encontrada", { id: campaign.id, nome: campaign.nome, codigo: clean });
   campaign.jogadores = Array.from(new Set([...(campaign.jogadores || []), user.id]));
   user.campaignIds = Array.from(new Set([...(user.campaignIds || []), campaign.id]));
   state.activeCampaignId = campaign.id;
   state.activeSessionId = campaign.sessoes.find((session) => session.visibleToPlayers)?.id || campaign.sessoes[0]?.id;
   linkActiveSheetToCampaign(campaign);
+  console.log("[Supabase] Ficha vinculada a campanha", { campanha_id: campaign.id, ficha_id: state.activeSheetId, usuario: user.username });
   await saveOnlineState();
   return campaign;
 }
@@ -1360,7 +1673,7 @@ function blankSheet(name = "Novo agente", player = "Local") {
 
 function save() {
   syncCurrentSession();
-  localStorage.setItem("mesa-arcana", JSON.stringify(state));
+  saveLightSession();
   queueOnlineSave();
 }
 
@@ -4621,6 +4934,65 @@ function setSignupError(message) {
   if (error) error.textContent = message || "";
 }
 
+function setServerStatus(online, detail = "") {
+  const badge = document.querySelector("#serverStatusBadge");
+  if (!badge) return;
+  badge.classList.toggle("offline", !online);
+  badge.textContent = online ? "Servidor: ON" : "Servidor: OFF";
+  if (detail) badge.title = detail;
+}
+
+async function updateServerStatus() {
+  const client = supabaseClient();
+  if (!client) {
+    setServerStatus(false, "Supabase nao carregou.");
+    return false;
+  }
+  try {
+    const { error } = await client.from("usuarios").select("id").limit(1);
+    if (error) throw error;
+    console.log("[Supabase] Supabase conectado");
+    setServerStatus(true, "Supabase conectado.");
+    return true;
+  } catch (error) {
+    console.error("[Supabase] Erro Supabase", { table: "usuarios", error });
+    setServerStatus(false, remoteErrorMessage(error));
+    return false;
+  }
+}
+
+async function recoverPasswordOnline() {
+  const identifier = document.querySelector("#loginUser")?.value.trim() || window.prompt("Usuario ou email cadastrado:", "");
+  if (!identifier) return;
+  const newPassword = window.prompt("Nova senha para este acesso:", "");
+  if (!newPassword) return;
+  if (newPassword.length < 4) {
+    setAuthError("A nova senha precisa ter pelo menos 4 caracteres.");
+    return;
+  }
+  const client = supabaseClient();
+  if (!client) {
+    setAuthError("Servidor indisponivel. Nao foi possivel recuperar agora.");
+    return;
+  }
+  try {
+    const users = await safeSelect("usuarios", "*");
+    const row = users.find((item) =>
+      item.username?.toLowerCase() === identifier.toLowerCase() ||
+      item.email?.toLowerCase() === identifier.toLowerCase()
+    );
+    if (!row) throw new Error("Usuario/email nao encontrado.");
+    const account = userFromRow(row);
+    account.passwordHash = await hashPassword(newPassword);
+    await saveOnlineUser(account);
+    setAuthError("Senha atualizada. Entre novamente com a nova senha.");
+    console.log("[Supabase] Senha atualizada para usuario", { id: account.id, username: account.username });
+  } catch (error) {
+    console.error("[Supabase] Erro Supabase", { action: "recoverPassword", error });
+    setAuthError(`Nao consegui recuperar senha: ${error.message}`);
+  }
+}
+
 function showSignup() {
   document.querySelector("#signupModal")?.classList.remove("hidden");
   setSignupError("");
@@ -4662,6 +5034,7 @@ document.querySelector("#loginForm")?.addEventListener("submit", async (event) =
     try {
       await loginAccountOnline(document.querySelector("#loginUser").value, document.querySelector("#loginPassword").value);
     } catch (onlineError) {
+      if (supabaseClient()) throw onlineError;
       console.warn("[Supabase] Login online falhou, tentando backup local.", onlineError);
       loginAccount(document.querySelector("#loginUser").value, document.querySelector("#loginPassword").value);
       setSyncStatus("Login local ativo. Supabase nao carregou este acesso.", true);
@@ -4676,6 +5049,17 @@ document.querySelector("#loginForm")?.addEventListener("submit", async (event) =
 document.querySelector("#createAccess")?.addEventListener("click", () => {
   showSignup();
 });
+
+document.querySelector("#toggleLoginPassword")?.addEventListener("click", () => {
+  const input = document.querySelector("#loginPassword");
+  const button = document.querySelector("#toggleLoginPassword");
+  if (!input || !button) return;
+  const showing = input.type === "text";
+  input.type = showing ? "password" : "text";
+  button.textContent = showing ? "Mostrar" : "Ocultar";
+});
+
+document.querySelector("#recoverPassword")?.addEventListener("click", recoverPasswordOnline);
 
 document.querySelector("#signupCancel")?.addEventListener("click", () => {
   hideSignup();
@@ -4692,6 +5076,7 @@ document.querySelector("#signupForm")?.addEventListener("submit", async (event) 
         document.querySelector("#signupConfirm").value
       );
     } catch (onlineError) {
+      if (supabaseClient()) throw onlineError;
       console.warn("[Supabase] Criacao online falhou, criando backup local.", onlineError);
       createAccount(
         document.querySelector("#signupUser").value,
@@ -4717,6 +5102,7 @@ document.querySelector("#inviteAccess")?.addEventListener("click", async () => {
     try {
       await loginAccountOnline(document.querySelector("#loginUser").value, document.querySelector("#loginPassword").value);
     } catch (onlineError) {
+      if (supabaseClient()) throw onlineError;
       console.warn("[Supabase] Convite com login online falhou, tentando local.", onlineError);
       loginAccount(document.querySelector("#loginUser").value, document.querySelector("#loginPassword").value);
     }
@@ -4732,6 +5118,11 @@ document.querySelector("#inviteAccess")?.addEventListener("click", async () => {
 document.querySelector("#logoutButton")?.addEventListener("click", () => {
   supabaseClient()?.auth?.signOut?.();
   state.currentUserId = null;
+  try {
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+  } catch (error) {
+    console.warn("[Storage] Nao consegui limpar sessao leve.", error);
+  }
   save();
   showLogin();
 });
@@ -5074,21 +5465,10 @@ async function bootApp() {
   if (state.activeTab === "configuracoes") state.activeTab = "mesa";
   if (!document.getElementById(state.activeTab)) state.activeTab = "mesa";
   const client = supabaseClient();
+  await updateServerStatus();
   if (client) {
     try {
-      const { data } = await client.auth.getSession();
-      const authUser = data?.session?.user;
-      if (authUser) {
-        upsertLocalAccount({
-          id: authUser.id,
-          username: authUser.user_metadata?.username || authUser.email?.split("@")[0] || "agente",
-          email: authUser.email || "",
-          role: currentUser()?.role || "player",
-          sheetIds: currentUser()?.sheetIds || [],
-          campaignIds: currentUser()?.campaignIds || [],
-          online: true
-        });
-        state.currentUserId = authUser.id;
+      if (state.currentUserId && currentUser()) {
         await loadOnlineWorkspace();
       }
     } catch (error) {
