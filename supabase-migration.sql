@@ -272,6 +272,25 @@ alter table public.campanhas replica identity full;
 alter table public.campanha_jogadores replica identity full;
 alter table public.ficha_solicitacoes replica identity full;
 
+alter table public.campanha_jogadores enable row level security;
+alter table public.ficha_solicitacoes enable row level security;
+
+drop policy if exists "teste_all_campanha_jogadores" on public.campanha_jogadores;
+create policy "teste_all_campanha_jogadores"
+on public.campanha_jogadores
+for all
+to anon, authenticated
+using (true)
+with check (true);
+
+drop policy if exists "teste_all_ficha_solicitacoes" on public.ficha_solicitacoes;
+create policy "teste_all_ficha_solicitacoes"
+on public.ficha_solicitacoes
+for all
+to anon, authenticated
+using (true)
+with check (true);
+
 do $$
 begin
   if not exists (

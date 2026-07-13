@@ -955,7 +955,7 @@ function isMissingColumnError(error) {
 
 function isMissingRelationError(error) {
   const text = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`.toLowerCase();
-  return text.includes("relation") || text.includes("does not exist") || text.includes("schema cache") || text.includes("on conflict") || text.includes("unique") || text.includes("constraint");
+  return text.includes("relation") || text.includes("does not exist") || text.includes("schema cache") || text.includes("on conflict") || text.includes("unique") || text.includes("constraint") || text.includes("row-level security") || text.includes("violates row-level");
 }
 
 function upsertLocalAccount(account) {
@@ -1304,7 +1304,11 @@ function queueOnlineSave(delay = 900) {
   window.clearTimeout(onlineSaveTimer);
   onlineSaveTimer = window.setTimeout(() => {
     saveOnlineState().catch((error) => {
-      setSyncStatus(`Backup local salvo. Supabase falhou: ${error.message}`, true);
+      const message = error.invalidCampaignId
+        ? "Ficha salva apenas localmente porque a campanha nao foi encontrada no servidor."
+        : `Backup local salvo. Supabase falhou: ${error.message}`;
+      if (error.invalidCampaignId) console.warn("Backup local criado por falha no Supabase", error);
+      setSyncStatus(message, true);
     });
   }, delay);
 }
@@ -1382,8 +1386,8 @@ function sheetCampaignId(sheetId) {
 
 function sheetDatabaseRow(sheet, user, now = new Date().toISOString()) {
   const safeSheet = normalizeSheet(sheet);
-  const campaignId = uuidOrNull(safeSheet.campanha_id || safeSheet.campanhaId) || uuidOrNull(sheetCampaignId(safeSheet.id));
   const origin = safeSheet.origem || "jogador";
+  const campaignId = uuidOrNull(safeSheet.campanha_id || safeSheet.campanhaId);
   const ownerId = uuidOrNull(safeSheet.owner_id || safeSheet.ownerId) || uuidOrNull(user.id);
   const responsibleId = uuidOrNull(safeSheet.responsavel_id || safeSheet.responsavelId) || uuidOrNull(user.id);
   return {
@@ -1438,24 +1442,91 @@ function minimalSheetDatabaseRow(row) {
   };
 }
 
+async function campaignExistsInSupabase(campaignId) {
+  const client = supabaseClient();
+  const safeId = uuidOrNull(campaignId);
+  console.log("Validando campanha antes de salvar personagem");
+  console.log("campanha_id recebido:", safeId || campaignId || "");
+  if (!client || !safeId) return false;
+  const { data, error } = await client.from("campanhas").select("id,nome").eq("id", safeId).limit(1);
+  if (error) {
+    console.error("[Supabase] Erro ao validar campanha", error);
+    return false;
+  }
+  const found = Array.isArray(data) ? data[0] : null;
+  if (found) {
+    console.log("Campanha encontrada no Supabase:", found);
+    return true;
+  }
+  console.warn("Campanha nao encontrada:", safeId);
+  return false;
+}
+
+async function filterValidCharacterRows(rows) {
+  const validRows = [];
+  const invalidRows = [];
+  for (const row of rows) {
+    const origin = normalizeKey(row.origem || row.payload?.origem || "jogador");
+    const campaignId = uuidOrNull(row.campanha_id);
+    if (!campaignId) {
+      if (origin === "sessao") {
+        console.warn("Bloqueado salvamento com campanha_id invalido", { ficha_id: row.id, origem: origin, campanha_id: row.campanha_id });
+        invalidRows.push(row);
+        continue;
+      }
+      console.log("Salvando ficha pessoal sem campanha_id", { ficha_id: row.id });
+      validRows.push({ ...row, campanha_id: null });
+      continue;
+    }
+    if (origin === "sessao") console.log("Salvando ficha da sessao com campanha_id:", campaignId);
+    const exists = await campaignExistsInSupabase(campaignId);
+    if (!exists) {
+      console.warn("Bloqueado salvamento com campanha_id invalido", { ficha_id: row.id, campanha_id: campaignId });
+      invalidRows.push(row);
+      continue;
+    }
+    validRows.push({ ...row, campanha_id: campaignId });
+  }
+  return { validRows, invalidRows };
+}
+
 async function upsertSheetsOnline(rows) {
   const client = supabaseClient();
   if (!client || !rows.length) return;
-  const { error } = await client.from("personagens").upsert(rows, { onConflict: "id" });
+  const { validRows, invalidRows } = await filterValidCharacterRows(rows);
+  if (!validRows.length && invalidRows.length) {
+    console.warn("Backup local criado por falha no Supabase", invalidRows.map((row) => row.id));
+    const error = new Error("Ficha salva apenas localmente porque a campanha nao foi encontrada no servidor.");
+    error.invalidCampaignId = true;
+    throw error;
+  }
+  const { error } = await client.from("personagens").upsert(validRows, { onConflict: "id" });
   if (!error) {
-    console.log("[Supabase] Ficha criada/atualizada no Supabase", rows.map((row) => row.id));
+    console.log("[Supabase] Ficha criada/atualizada no Supabase", validRows.map((row) => row.id));
+    if (invalidRows.length) {
+      console.warn("Backup local criado por falha no Supabase", invalidRows.map((row) => row.id));
+      const invalidError = new Error("Ficha salva apenas localmente porque a campanha nao foi encontrada no servidor.");
+      invalidError.invalidCampaignId = true;
+      throw invalidError;
+    }
     return;
   }
   if (isMissingColumnError(error)) {
     console.warn("[Supabase] Colunas completas de personagens ausentes. Usando fallback minimo. Rode supabase-migration.sql.", error);
-    const fallback = await client.from("personagens").upsert(rows.map(minimalSheetDatabaseRow), { onConflict: "id" });
+    const fallback = await client.from("personagens").upsert(validRows.map(minimalSheetDatabaseRow), { onConflict: "id" });
     if (fallback.error) {
       console.error("[Supabase] Erro Supabase", { table: "personagens", rows: fallback, error: fallback.error });
       throw new Error(`personagens: ${remoteErrorMessage(fallback.error)}`);
     }
+    if (invalidRows.length) {
+      console.warn("Backup local criado por falha no Supabase", invalidRows.map((row) => row.id));
+      const invalidError = new Error("Ficha salva apenas localmente porque a campanha nao foi encontrada no servidor.");
+      invalidError.invalidCampaignId = true;
+      throw invalidError;
+    }
     return;
   }
-  console.error("[Supabase] Erro Supabase", { table: "personagens", rows, error });
+  console.error("[Supabase] Erro Supabase", { table: "personagens", rows: validRows, error });
   throw new Error(`personagens: ${remoteErrorMessage(error)}`);
 }
 
@@ -1684,6 +1755,9 @@ async function reviewSheetRequest(requestId, status) {
   const client = supabaseClient();
   const accepted = status === "aceita";
   try {
+    if (accepted && supabaseClient() && !(await campaignExistsInSupabase(campaign.id))) {
+      throw new Error("Campanha invalida ou nao encontrada. Recarregue a mesa.");
+    }
     if (accepted) {
       if (!sheet) throw new Error("Ficha nao carregada localmente. Atualize a campanha.");
       console.log("Mestre aceitou ficha pronta", request);
@@ -1896,6 +1970,7 @@ async function saveOnlineState() {
   if (!client || !isOnlineUser(user) || onlineSaveRunning) return;
   onlineSaveRunning = true;
   try {
+    console.log("Tentando sincronizar backup local");
     syncCurrentSession();
     await saveOnlineUser(user);
     const now = new Date().toISOString();
@@ -1969,6 +2044,7 @@ async function saveOnlineState() {
       if (error) throw new Error(`rolagens: ${remoteErrorMessage(error)}`);
     }
     setSyncStatus("Sincronizado com Supabase.");
+    console.log("Backup local sincronizado com Supabase");
   } finally {
     onlineSaveRunning = false;
   }
@@ -2046,6 +2122,14 @@ function createSheetForCurrentUser(name, systemId = "arquivo") {
   console.log("Criando ficha no Supabase", { nome: name, sistema_regra: system.id });
   const defaultName = system.id === "dnd5e" ? `Aventureiro ${user.sheetIds.length + 1}` : `Agente ${user.sheetIds.length + 1}`;
   const sheet = blankSheetForSystem(system.id, name || defaultName, user.username);
+  sheet.campanha_id = "";
+  sheet.campanhaId = "";
+  sheet.origem = "jogador";
+  sheet.owner_id = uuidOrNull(user.id);
+  sheet.ownerId = sheet.owner_id;
+  sheet.responsavel_id = uuidOrNull(user.id);
+  sheet.responsavelId = sheet.responsavel_id;
+  sheet.user_id = uuidOrNull(user.id);
   state.sheets.unshift(sheet);
   user.sheetIds.push(sheet.id);
   state.activeSheetId = sheet.id;
@@ -2677,12 +2761,12 @@ async function joinCampaignWithInvite(code) {
   if (!user) throw new Error("Faca login primeiro.");
   const clean = normalizeInviteCode(code);
   if (!clean) throw new Error("Informe o codigo do convite.");
-  let campaign = state.campaigns.find((item) => campaignMatchesInvite(item, clean));
-  if (!campaign) {
-    const onlineCampaign = await findCampaignByInviteOnline(clean);
-    if (onlineCampaign) campaign = upsertLocalCampaign(onlineCampaign);
-  }
+  const onlineCampaign = await findCampaignByInviteOnline(clean);
+  let campaign = onlineCampaign ? upsertLocalCampaign(onlineCampaign) : state.campaigns.find((item) => campaignMatchesInvite(item, clean));
   if (!campaign) throw new Error("Convite nao encontrado.");
+  if (supabaseClient() && !(await campaignExistsInSupabase(campaign.id))) {
+    throw new Error("Campanha invalida ou nao encontrada. Recarregue a mesa.");
+  }
   console.log("[Supabase] Campanha encontrada", { id: campaign.id, nome: campaign.nome, codigo: clean });
   campaign.jogadores = Array.from(new Set([...(campaign.jogadores || []), user.id]));
   user.campaignIds = Array.from(new Set([...(user.campaignIds || []), campaign.id]));
@@ -3884,6 +3968,10 @@ async function createSessionSheetFromPanel() {
   const user = currentUser();
   if (!campaign || !uuidOrNull(campaign.id)) {
     window.alert("Selecione uma campanha salva antes de criar ficha da sessao.");
+    return;
+  }
+  if (supabaseClient() && !(await campaignExistsInSupabase(campaign.id))) {
+    setSyncStatus("Campanha invalida ou nao encontrada. Recarregue a mesa.", true);
     return;
   }
   const system = systemFor(campaignSystemId(campaign));
@@ -9846,9 +9934,13 @@ document.querySelector("#createCampaignButton")?.addEventListener("click", async
       document.querySelector("#newCampaignName").value.trim() || "Nova campanha",
       selectedSystemValue("#newCampaignSystem")
     );
+    const user = currentUser();
+    const now = new Date().toISOString();
+    await upsertCampaignsOnline([campaignDatabaseRow(campaign, now, user)]);
+    await saveOnlineUser(user);
+    await upsertCampaignPlayerOnline(campaign.id, user?.id, "mestre", "ativo");
+    saveLightSession();
     save();
-    await saveOnlineState();
-    await upsertCampaignPlayerOnline(campaign.id, currentUser()?.id, "mestre", "ativo");
     state.portalPage = "mesas";
     renderPortal();
   } catch (error) {
