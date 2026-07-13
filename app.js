@@ -1590,24 +1590,64 @@ function localCampaignPlayers(campaign = currentCampaign()) {
 
 async function upsertCampaignPlayerOnline(campaignId, userId, role = "jogador", status = "ativo") {
   const client = supabaseClient();
-  if (!client || !uuidOrNull(campaignId) || !uuidOrNull(userId)) return;
-  const row = { campanha_id: campaignId, user_id: userId, role, status };
-  const { data, error } = await client.from("campanha_jogadores").upsert(row, { onConflict: "campanha_id,user_id" }).select("*").limit(1);
-  if (error) {
-    if (isMissingRelationError(error) || isMissingColumnError(error)) {
-      console.warn("[Supabase] campanha_jogadores ausente. Rode supabase-migration.sql.", error);
+  const safeCampaignId = uuidOrNull(campaignId);
+  const safeUserId = uuidOrNull(userId);
+  if (!client || !safeCampaignId || !safeUserId) return;
+  console.log("Registrando jogador na campanha:", { campanha_id: safeCampaignId, user_id: safeUserId, role, status });
+  if (!(await campaignExistsInSupabase(safeCampaignId))) {
+    console.warn("Campanha nao encontrada:", safeCampaignId);
+    throw new Error("Campanha atual invalida. Recarregue a mesa.");
+  }
+  const row = {
+    campanha_id: safeCampaignId,
+    user_id: safeUserId,
+    role,
+    status,
+    updated_at: new Date().toISOString()
+  };
+  const existing = await client
+    .from("campanha_jogadores")
+    .select("*")
+    .eq("campanha_id", safeCampaignId)
+    .eq("user_id", safeUserId)
+    .limit(1);
+  if (existing.error) {
+    if (isMissingRelationError(existing.error) || isMissingColumnError(existing.error)) {
+      console.warn("[Supabase] campanha_jogadores ausente. Rode supabase-migration.sql.", existing.error);
       return;
     }
-    throw new Error(`campanha_jogadores: ${remoteErrorMessage(error)}`);
+    throw new Error(`campanha_jogadores: ${remoteErrorMessage(existing.error)}`);
   }
-  const saved = Array.isArray(data) ? data[0] : null;
-  if (saved) state.campaignPlayers = mergeById(state.campaignPlayers || [], [saved]);
+  const existingRow = Array.isArray(existing.data) ? existing.data[0] : null;
+  const result = existingRow?.id
+    ? await client.from("campanha_jogadores").update(row).eq("id", existingRow.id).select("*").limit(1)
+    : await client.from("campanha_jogadores").insert({ ...row, created_at: new Date().toISOString() }).select("*").limit(1);
+  if (result.error) {
+    if (isMissingRelationError(result.error) || isMissingColumnError(result.error)) {
+      console.warn("[Supabase] campanha_jogadores ausente. Rode supabase-migration.sql.", result.error);
+      return;
+    }
+    throw new Error(`campanha_jogadores: ${remoteErrorMessage(result.error)}`);
+  }
+  const saved = Array.isArray(result.data) ? result.data[0] : null;
+  if (saved) {
+    state.campaignPlayers = [
+      ...(state.campaignPlayers || []).filter((item) => !(item.campanha_id === safeCampaignId && item.user_id === safeUserId)),
+      saved
+    ];
+    console.log("Jogador registrado em campanha_jogadores", saved);
+  }
 }
 
 async function loadCampaignPlayersFromSupabase(campaign = currentCampaign()) {
-  console.log("Carregando jogadores da mesa", { campanha_id: campaign?.id || "" });
+  console.log("Carregando jogadores da mesa");
+  console.log("campanha_id atual:", campaign?.id || "");
   const client = supabaseClient();
-  if (!client || !campaign || !uuidOrNull(campaign.id)) return localCampaignPlayers(campaign);
+  if (!campaign || !uuidOrNull(campaign.id)) {
+    setSyncStatus("Campanha atual invalida. Recarregue a mesa.", true);
+    return [];
+  }
+  if (!client) return localCampaignPlayers(campaign);
   try {
     let { data: rows, error } = await client
       .from("campanha_jogadores")
@@ -1621,19 +1661,39 @@ async function loadCampaignPlayersFromSupabase(campaign = currentCampaign()) {
       throw error;
     }
     rows = Array.isArray(rows) ? rows : [];
+    console.log("Registros campanha_jogadores encontrados:", rows);
     const userIds = rows.map((row) => uuidOrNull(row.user_id)).filter(Boolean);
+    const linkedSheets = sheetsLinkedToCampaign(campaign);
+    let userMap = {};
     if (userIds.length) {
+      console.log("Buscando usuarios dos jogadores", userIds);
       const { data: users, error: usersError } = await client.from("usuarios").select("id,username,email").in("id", Array.from(new Set(userIds)));
       if (!usersError && Array.isArray(users)) {
+        userMap = Object.fromEntries(users.map((row) => [row.id, row]));
         users.forEach((row) => upsertLocalAccount({ id: row.id, username: row.username || row.email || "jogador", email: row.email || "", role: "player", sheetIds: [], campaignIds: [campaign.id], online: true }));
+      } else if (usersError) {
+        console.warn("Erro ao buscar usuarios dos jogadores", usersError);
       }
     }
+    const enrichedRows = rows.map((row) => {
+      const userRow = userMap[row.user_id] || state.accounts.find((account) => account.id === row.user_id) || {};
+      const linkedCount = linkedSheets.filter((sheet) =>
+        [sheet.user_id, sheet.owner_id, sheet.responsavel_id, sheet.userId, sheet.ownerId, sheet.responsavelId].map(uuidOrNull).includes(row.user_id)
+      ).length;
+      return {
+        ...row,
+        username: userRow.username || userRow.email || (row.role === "mestre" ? "Mestre" : "Jogador"),
+        email: userRow.email || "",
+        linkedCount
+      };
+    });
     state.campaignPlayers = [
       ...(state.campaignPlayers || []).filter((item) => item.campanha_id !== campaign.id),
-      ...rows
+      ...enrichedRows
     ];
-    console.log("Jogadores encontrados", { campanha_id: campaign.id, total: rows.length });
-    return localCampaignPlayers(campaign);
+    if (!enrichedRows.length) console.log("Nenhum jogador encontrado para esta campanha");
+    console.log("Jogadores da mesa renderizados", { campanha_id: campaign.id, total: enrichedRows.length });
+    return enrichedRows;
   } catch (error) {
     console.error("Erro ao carregar jogadores da mesa", error);
     setSyncStatus(`Erro ao carregar jogadores da mesa: ${remoteErrorMessage(error)}`, true);
@@ -2317,6 +2377,11 @@ async function refreshActiveCampaignFromSupabase({ rerender = false } = {}) {
   state.sheets = mergeById(state.sheets, linkedSheets).map(normalizeSheet);
   campaign.personagens = linkedSheets.map((sheet) => sheet.id);
   campaign.jogadores = mergeUnique([...(campaign.jogadores || []), ...userIds]);
+  const activeUser = currentUser();
+  if (activeUser?.id && uuidOrNull(campaign.id)) {
+    const role = activeUser.role === "admin" || campaign.mestreId === activeUser.id || campaign.owner_id === activeUser.id || campaign.ownerId === activeUser.id ? "mestre" : "jogador";
+    await upsertCampaignPlayerOnline(campaign.id, activeUser.id, role, "ativo");
+  }
   await loadCampaignPlayersFromSupabase(campaign);
   await loadSheetRequestsFromSupabase(campaign);
   state.campaigns = state.campaigns.map((item) => item.id === campaign.id ? campaign : item);
@@ -2761,13 +2826,14 @@ async function joinCampaignWithInvite(code) {
   if (!user) throw new Error("Faca login primeiro.");
   const clean = normalizeInviteCode(code);
   if (!clean) throw new Error("Informe o codigo do convite.");
+  console.log("Entrando na campanha por convite", { codigo: clean, user_id: user.id });
   const onlineCampaign = await findCampaignByInviteOnline(clean);
   let campaign = onlineCampaign ? upsertLocalCampaign(onlineCampaign) : state.campaigns.find((item) => campaignMatchesInvite(item, clean));
   if (!campaign) throw new Error("Convite nao encontrado.");
   if (supabaseClient() && !(await campaignExistsInSupabase(campaign.id))) {
     throw new Error("Campanha invalida ou nao encontrada. Recarregue a mesa.");
   }
-  console.log("[Supabase] Campanha encontrada", { id: campaign.id, nome: campaign.nome, codigo: clean });
+  console.log("Campanha encontrada:", { id: campaign.id, nome: campaign.nome, codigo: clean });
   campaign.jogadores = Array.from(new Set([...(campaign.jogadores || []), user.id]));
   user.campaignIds = Array.from(new Set([...(user.campaignIds || []), campaign.id]));
   state.activeCampaignId = campaign.id;
@@ -8515,6 +8581,27 @@ function renderPlayerOptions(players = [], selected = "") {
   return `<option value="">Sem jogador vinculado</option>${options.join("")}`;
 }
 
+function tablePlayersForCampaign(campaign = currentCampaign()) {
+  if (!campaign || !uuidOrNull(campaign.id)) return [];
+  const remoteRows = (state.campaignPlayers || []).filter((item) => item.campanha_id === campaign.id && uuidOrNull(item.user_id));
+  if (remoteRows.length || supabaseClient()) {
+    const linkedSheets = sheetsLinkedToCampaign(campaign);
+    return remoteRows.map((row) => {
+      const account = state.accounts.find((item) => item.id === row.user_id) || {};
+      const linkedCount = linkedSheets.filter((sheet) =>
+        [sheet.user_id, sheet.owner_id, sheet.responsavel_id, sheet.userId, sheet.ownerId, sheet.responsavelId].map(uuidOrNull).includes(row.user_id)
+      ).length;
+      return {
+        ...row,
+        username: row.username || account.username || account.email || (row.role === "mestre" ? "Mestre" : "Jogador"),
+        email: row.email || account.email || "",
+        linkedCount
+      };
+    });
+  }
+  return localCampaignPlayers(campaign);
+}
+
 function sessionSheetTypeLabel(sheet) {
   return sheet.fichaCategoria || sheet.sheetType || sheet.payload?.fichaCategoria || "Personagem da sessao";
 }
@@ -8527,7 +8614,7 @@ function renderTableSheetsPanel() {
     els.tableSheetsPanel.innerHTML = "";
     return;
   }
-  const players = localCampaignPlayers(campaign);
+  const players = tablePlayersForCampaign(campaign);
   const linkedSheets = sheetsLinkedToCampaign(campaign);
   const sessionSheets = linkedSheets.filter((sheet) => sheetOrigin(sheet) === "sessao");
   console.log("Carregando fichas da sessao", { campanha_id: campaign.id, total: sessionSheets.length });
@@ -8573,13 +8660,14 @@ function renderTableSheetsPanel() {
         ${players.length ? players.map((player) => `
           <article class="table-sheet-card compact">
             <b>${escapeHtml(player.username)}</b>
-            <span>${escapeHtml(player.role || "jogador")} | ${escapeHtml(player.status || "ativo")}</span>
-            <small>${player.linkedCount || 0} ficha(s) vinculada(s)</small>
+            <span>${escapeHtml(player.role === "mestre" ? "Mestre" : "Jogador")} | ${escapeHtml(player.status || "ativo")}</span>
+            <small>${player.linkedCount ? `${player.linkedCount} ficha(s) vinculada(s)` : "Sem ficha vinculada"}</small>
             <div>
               <button type="button" data-filter-player-sheets="${escapeAttr(player.user_id)}">Ver fichas</button>
+              ${sessionSheets.length ? `<button type="button" data-link-session-sheet-player="${escapeAttr(player.user_id)}">Vincular ficha da sessao</button>` : ""}
             </div>
           </article>
-        `).join("") : `<p>Nenhum jogador encontrado nesta campanha.</p>`}
+        `).join("") : `<p>Nenhum jogador entrou nesta mesa ainda.</p>`}
       </div>
     </section>
     <section class="table-sheet-block">
@@ -8690,6 +8778,23 @@ function attachTableSheetPanelEvents(players = []) {
         [sheet.user_id, sheet.owner_id, sheet.responsavel_id, sheet.userId, sheet.ownerId, sheet.responsavelId].map(uuidOrNull).includes(playerId)
       ).length;
       setSyncStatus(`${playerNameById(playerId)} tem ${total} ficha(s) vinculada(s) nesta mesa.`);
+    });
+  });
+  root.querySelectorAll("[data-link-session-sheet-player]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const playerId = uuidOrNull(button.dataset.linkSessionSheetPlayer);
+      const campaign = currentCampaign();
+      const sessionSheets = sheetsLinkedToCampaign(campaign).filter((sheet) => sheetOrigin(sheet) === "sessao");
+      const target = sessionSheets.find((sheet) => !uuidOrNull(sheet.responsavelId || sheet.responsavel_id)) || sessionSheets[0];
+      if (!playerId || !target) {
+        setSyncStatus("Nenhuma ficha da sessao disponivel para vincular.", true);
+        return;
+      }
+      state.pendingResponsibleSheetId = target.id;
+      renderTableSheetsPanel();
+      const select = els.tableSheetsPanel?.querySelector(`[data-responsible-target="${selectorEscape(target.id)}"]`);
+      if (select) select.value = playerId;
+      setSyncStatus(`Escolha a ficha da sessao para vincular a ${playerNameById(playerId)}.`);
     });
   });
   root.querySelectorAll("[data-table-open-sheet]").forEach((button) => {
@@ -9939,6 +10044,7 @@ document.querySelector("#createCampaignButton")?.addEventListener("click", async
     await upsertCampaignsOnline([campaignDatabaseRow(campaign, now, user)]);
     await saveOnlineUser(user);
     await upsertCampaignPlayerOnline(campaign.id, user?.id, "mestre", "ativo");
+    await loadCampaignPlayersFromSupabase(campaign);
     saveLightSession();
     save();
     state.portalPage = "mesas";
