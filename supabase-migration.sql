@@ -25,6 +25,9 @@ create table if not exists public.campanhas (
   invite_code text,
   sistema_regra text default 'arquivo',
   theme_key text default 'theme-arquivo',
+  grid_rows int default 17,
+  grid_cols int default 32,
+  active_scene_id text,
   objetivo_atual text,
   local_atual text,
   payload jsonb default '{}'::jsonb,
@@ -44,6 +47,14 @@ create table if not exists public.personagens (
   sanidade jsonb default '{}'::jsonb,
   payload jsonb default '{}'::jsonb,
   sistema_regra text default 'arquivo',
+  origem text default 'jogador',
+  owner_id uuid,
+  responsavel_id uuid,
+  edit_locked boolean default false,
+  edit_allowed_by_master boolean default false,
+  download_allowed boolean default false,
+  migrada boolean default false,
+  migrated_to_personagem_id uuid,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
@@ -52,6 +63,7 @@ create table if not exists public.inventario (
   id uuid primary key default gen_random_uuid(),
   user_id uuid,
   personagem_id uuid,
+  campanha_id uuid,
   nome text,
   payload jsonb default '{}'::jsonb,
   created_at timestamptz default now(),
@@ -108,6 +120,9 @@ alter table public.campanhas add column if not exists codigo_convite text;
 alter table public.campanhas add column if not exists invite_code text;
 alter table public.campanhas add column if not exists sistema_regra text default 'arquivo';
 alter table public.campanhas add column if not exists theme_key text default 'theme-arquivo';
+alter table public.campanhas add column if not exists grid_rows int default 17;
+alter table public.campanhas add column if not exists grid_cols int default 32;
+alter table public.campanhas add column if not exists active_scene_id text;
 alter table public.campanhas add column if not exists objetivo_atual text;
 alter table public.campanhas add column if not exists local_atual text;
 alter table public.campanhas add column if not exists payload jsonb default '{}'::jsonb;
@@ -129,18 +144,26 @@ alter table public.personagens add column if not exists vida jsonb default '{}':
 alter table public.personagens add column if not exists sanidade jsonb default '{}'::jsonb;
 alter table public.personagens add column if not exists payload jsonb default '{}'::jsonb;
 alter table public.personagens add column if not exists sistema_regra text default 'arquivo';
+alter table public.personagens add column if not exists origem text default 'jogador';
+alter table public.personagens add column if not exists owner_id uuid;
+alter table public.personagens add column if not exists responsavel_id uuid;
+alter table public.personagens add column if not exists edit_locked boolean default false;
+alter table public.personagens add column if not exists edit_allowed_by_master boolean default false;
+alter table public.personagens add column if not exists download_allowed boolean default false;
+alter table public.personagens add column if not exists migrada boolean default false;
+alter table public.personagens add column if not exists migrated_to_personagem_id uuid;
 alter table public.personagens add column if not exists created_at timestamptz default now();
 alter table public.personagens add column if not exists updated_at timestamptz default now();
 
 alter table public.inventario add column if not exists user_id uuid;
 alter table public.inventario add column if not exists personagem_id uuid;
+alter table public.inventario add column if not exists campanha_id uuid;
 alter table public.inventario add column if not exists nome text;
 alter table public.inventario add column if not exists payload jsonb default '{}'::jsonb;
 alter table public.inventario add column if not exists created_at timestamptz default now();
 alter table public.inventario add column if not exists updated_at timestamptz default now();
 
 -- D&D 5e: campos dedicados para inventario/equipamentos setorizados.
-alter table public.inventario add column if not exists campanha_id uuid;
 alter table public.inventario add column if not exists categoria text;
 alter table public.inventario add column if not exists subtipo text;
 alter table public.inventario add column if not exists quantidade integer default 1;
@@ -196,6 +219,10 @@ alter table public.grid_tokens add column if not exists updated_at timestamptz d
 
 create index if not exists grid_tokens_campanha_cena_idx on public.grid_tokens (campanha_id, cena_id);
 create index if not exists grid_tokens_personagem_idx on public.grid_tokens (personagem_id);
+create index if not exists personagens_campanha_idx on public.personagens (campanha_id);
+create index if not exists personagens_responsavel_idx on public.personagens (responsavel_id);
+create index if not exists personagens_owner_idx on public.personagens (owner_id);
+create index if not exists inventario_campanha_personagem_idx on public.inventario (campanha_id, personagem_id);
 
 alter table public.grid_tokens replica identity full;
 alter table public.personagens replica identity full;

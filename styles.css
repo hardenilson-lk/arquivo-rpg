@@ -1760,6 +1760,36 @@ label {
   padding: 12px 0 2px;
   font-weight: 800;
 }
+
+.master-shield-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.sheet-lock-notice {
+  margin: 0 0 12px;
+  border: 1px dashed #9f1f1f;
+  background: rgba(159, 31, 31, .12);
+  color: #9f1f1f;
+  padding: 10px 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.sheet-lock-notice.unlocked {
+  border-color: #2f7d3b;
+  background: rgba(47, 125, 59, .12);
+  color: #2f7d3b;
+}
+
+.sheet-locked-by-master input,
+.sheet-locked-by-master textarea,
+.sheet-locked-by-master select {
+  cursor: not-allowed;
+  opacity: .72;
+}
 .preset-row {
   display: grid;
   grid-template-columns: repeat(7, minmax(54px, 1fr));

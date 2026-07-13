@@ -10,7 +10,7 @@ const state = {
   activeSheetId: null,
   accounts: [],
   campaigns: [],
-  map: { name: "Base da equipe", cols: 16, rows: 12, darkness: 58, lightsOn: true, cellSize: 56, tokenScale: 100, gridOpacity: 38, gridColor: "#debc79", background: defaultMapBackground(), fog: defaultFog(), marks: [], tool: "move" },
+  map: { name: "Base da equipe", cols: 32, rows: 17, darkness: 58, lightsOn: true, cellSize: 56, tokenScale: 100, gridOpacity: 38, gridColor: "#debc79", background: defaultMapBackground(), fog: defaultFog(), marks: [], tool: "move" },
   tokens: [],
   sheets: [],
   rolls: [],
@@ -702,7 +702,8 @@ function normalizeMapEdges(edges, cols, rows) {
 }
 
 function blankMap(name = "Mapa inicial") {
-  return normalizeMap({ name, cols: 16, rows: 12, darkness: 50, lightsOn: true });
+  console.log("Grid padrao criado: 17x32");
+  return normalizeMap({ name, cols: 32, rows: 17, darkness: 50, lightsOn: true });
 }
 
 function currentUser() {
@@ -749,6 +750,27 @@ function sheetSystemId(sheet) {
 function sheetMatchesCampaign(sheet, campaign = currentCampaign()) {
   if (!sheet || !campaign) return true;
   return sheetSystemId(sheet) === campaignSystemId(campaign);
+}
+
+function sheetOrigin(sheet) {
+  return normalizeKey(sheet?.origem || sheet?.origin || sheet?.payload?.origem || "jogador");
+}
+
+function sheetCampaignIdValue(sheet) {
+  return uuidOrNull(sheet?.campanhaId || sheet?.campanha_id || sheet?.campaignId || sheet?.payload?.campanha_id) || sheetCampaignId(sheet?.id);
+}
+
+function sheetVisibleToCurrentUser(sheet, campaign = currentCampaign()) {
+  const user = currentUser();
+  if (!sheet || !user) return false;
+  if (isMasterMode()) return !campaign || sheetCampaignIdValue(sheet) === campaign.id || (campaign.personagens || []).includes(sheet.id);
+  if ((user.sheetIds || []).includes(sheet.id)) return true;
+  const campaignId = campaign?.id || state.activeCampaignId;
+  const sheetCampaign = sheetCampaignIdValue(sheet);
+  const responsible = uuidOrNull(sheet.responsavelId || sheet.responsavel_id);
+  const owner = uuidOrNull(sheet.ownerId || sheet.owner_id);
+  if (sheetCampaign && campaignId && sheetCampaign !== campaignId) return false;
+  return responsible === user.id || owner === user.id;
 }
 
 function activeVisualSystemId() {
@@ -946,6 +968,8 @@ function upsertLocalAccount(account) {
 function normalizeCampaignRecord(campaign = {}) {
   const inviteCode = campaign.codigoConvite || campaign.codigo_convite || campaign.inviteCode || campaign.invite_code || `CAMP-${Math.floor(1000 + Math.random() * 9000)}`;
   const system = systemFor(campaign.payload?.sistema_regra || campaign.payload?.sistemaRegra || campaign.sistemaRegra || campaign.sistema_regra || campaign.system || "arquivo");
+  const gridRows = clamp(Number(campaign.grid_rows ?? campaign.gridRows ?? campaign.payload?.grid?.rows ?? campaign.payload?.grid_rows ?? 17), 6, 100);
+  const gridCols = clamp(Number(campaign.grid_cols ?? campaign.gridCols ?? campaign.payload?.grid?.cols ?? campaign.payload?.grid_cols ?? 32), 6, 100);
   const safe = {
     id: campaign.id || crypto.randomUUID(),
     nome: campaign.nome || campaign.name || "Campanha sem nome",
@@ -958,7 +982,12 @@ function normalizeCampaignRecord(campaign = {}) {
     personagens: Array.isArray(campaign.personagens) ? campaign.personagens : [],
     sessoes: Array.isArray(campaign.sessoes) && campaign.sessoes.length ? campaign.sessoes : [createSessionRecord(campaign.id || crypto.randomUUID(), 1, "Arquivo inicial", "Arquivo aberto para a primeira sessao.", blankMap("Mapa inicial"))],
     inviteCode,
-    codigoConvite: inviteCode
+    codigoConvite: inviteCode,
+    gridRows,
+    gridCols,
+    grid_rows: gridRows,
+    grid_cols: gridCols,
+    activeSceneId: campaign.activeSceneId || campaign.active_scene_id || campaign.payload?.activeSceneId || campaign.payload?.active_scene_id || ""
   };
   safe.sessoes = safe.sessoes.map((session, index) => ({
     ...createSessionRecord(safe.id, index + 1, session.titulo || `Sessao ${index + 1}`, session.resumo || "", normalizeMap(session.mapa || session.map || blankMap(session.titulo || "Mapa inicial"))),
@@ -966,7 +995,7 @@ function normalizeCampaignRecord(campaign = {}) {
     campaignId: safe.id,
     numero: Number(session.numero || index + 1),
     codigoArquivo: session.codigoArquivo || formatArquivoNumber(Number(session.numero || index + 1)),
-    mapa: normalizeMap(session.mapa || session.map || {}),
+    mapa: normalizeMap({ ...(session.mapa || session.map || {}), cols: gridCols, rows: gridRows }),
     tokens: Array.isArray(session.tokens) ? session.tokens : [],
     anotacoes: Array.isArray(session.anotacoes) ? session.anotacoes : [],
     pistas: Array.isArray(session.pistas) ? session.pistas : [],
@@ -1121,6 +1150,16 @@ async function saveOnlineUser(user = currentUser()) {
   throw new Error(`usuarios: ${remoteErrorMessage(error)}`);
 }
 
+async function fetchUserCharacterRows(client, user) {
+  if (!client || !isOnlineUser(user)) return { data: [], error: null };
+  const query = `user_id.eq.${user.id},owner_id.eq.${user.id},responsavel_id.eq.${user.id}`;
+  const result = await client.from("personagens").select("*").or(query);
+  if (!result.error) return { data: Array.isArray(result.data) ? result.data : [], error: null };
+  if (!isMissingColumnError(result.error)) return result;
+  console.warn("[Supabase] Colunas de controle de ficha ainda ausentes. Usando user_id como fallback. Rode supabase-migration.sql.", result.error);
+  return client.from("personagens").select("*").eq("user_id", user.id);
+}
+
 async function loadOnlineWorkspace() {
   const client = supabaseClient();
   const user = currentUser();
@@ -1136,17 +1175,16 @@ async function loadOnlineWorkspace() {
     console.time("carregar_personagens");
     const [
       ownedCampaignResult,
-      sheetResult,
       inventoryResult,
       noteResult,
       rollResult
     ] = await Promise.all([
       client.from("campanhas").select("*").or(`owner_id.eq.${user.id},mestre_id.eq.${user.id}`),
-      client.from("personagens").select("*").eq("user_id", user.id),
       client.from("inventario").select("*").eq("user_id", user.id),
       client.from("anotacoes").select("*").eq("user_id", user.id),
       client.from("rolagens").select("*").eq("user_id", user.id)
     ]);
+    const sheetResult = await fetchUserCharacterRows(client, user);
     console.timeEnd("carregar_personagens");
     console.timeEnd("carregar_campanhas");
 
@@ -1183,16 +1221,35 @@ async function loadOnlineWorkspace() {
       .map((row) => normalizeSheet({
         ...(row.payload || {}),
         id: row.id,
+        user_id: row.user_id,
+        owner_id: row.owner_id,
+        responsavel_id: row.responsavel_id,
+        origem: row.origem,
+        edit_locked: row.edit_locked,
+        edit_allowed_by_master: row.edit_allowed_by_master,
+        download_allowed: row.download_allowed,
+        migrada: row.migrada,
+        migrated_to_personagem_id: row.migrated_to_personagem_id,
+        campanha_id: row.campanha_id,
         name: row.payload?.name || row.nome || "",
         player: row.payload?.player || row.jogador || user.username || "Jogador"
       }))
-      .filter((sheet) => sheet.player === user.username || (user.sheetIds || []).includes(sheet.id) || sheetRows.some((row) => row.id === sheet.id && row.user_id === user.id));
+      .filter((sheet) => {
+        const row = sheetRows.find((item) => item.id === sheet.id);
+        return (user.sheetIds || []).includes(sheet.id) ||
+          row?.user_id === user.id ||
+          row?.owner_id === user.id ||
+          row?.responsavel_id === user.id;
+      });
 
     state.campaigns = mergeById(state.campaigns, remoteCampaigns).map(normalizeCampaignRecord);
     state.sheets = mergeById(state.sheets, remoteSheets).map(normalizeSheet);
 
-    const onlineSheetIds = sheetRows.filter((row) => row.user_id === user.id).map((row) => row.id).filter(Boolean);
-    user.sheetIds = mergeUnique([...(user.sheetIds || []), ...onlineSheetIds, ...remoteSheets.map((sheet) => sheet.id)]);
+    const onlineSheetIds = sheetRows
+      .filter((row) => row.user_id === user.id && normalizeKey(row.origem || row.payload?.origem || "jogador") !== "sessao")
+      .map((row) => row.id)
+      .filter(Boolean);
+    user.sheetIds = mergeUnique([...(user.sheetIds || []), ...onlineSheetIds]);
     const onlineCampaignIds = campaignRows
       .filter((row) => row.owner_id === user.id || row.mestre_id === user.id || row.payload?.mestreId === user.id || row.payload?.jogadores?.includes(user.id) || linkedCampaignIds.includes(row.id))
       .map((row) => row.id)
@@ -1253,6 +1310,7 @@ function markMapStructureChanged() {
   lastLocalGridChangeAt = Date.now();
   syncCurrentSession();
   saveLightSession();
+  console.log("Mestre alterou tamanho do grid", { rows: state.map.rows, cols: state.map.cols, campanha_id: state.activeCampaignId });
   queueOnlineSave(250);
 }
 
@@ -1275,12 +1333,21 @@ function campaignPayloadForSave(campaign) {
   payload.codigo_convite = payload.codigoConvite || payload.inviteCode;
   payload.invite_code = payload.inviteCode || payload.codigoConvite;
   payload.inviteCode = payload.inviteCode || payload.codigoConvite;
+  const isActiveCampaign = campaign?.id === state.activeCampaignId;
+  const session = campaign?.sessoes?.find((item) => isActiveCampaign && item.id === state.activeSessionId) || campaign?.sessoes?.[0];
+  const map = normalizeMap(session?.mapa || (isActiveCampaign ? state.map : {}) || {});
+  payload.grid = { rows: map.rows, cols: map.cols };
+  payload.grid_rows = map.rows;
+  payload.grid_cols = map.cols;
+  payload.active_scene_id = session?.id || state.activeSessionId || "";
   return payload;
 }
 
 function campaignDatabaseRow(campaign, now = new Date().toISOString(), user = currentUser()) {
   const payload = campaignPayloadForSave(campaign);
   const ownerId = uuidOrNull(campaign.mestreId) || uuidOrNull(user?.id);
+  const isActiveCampaign = campaign?.id === state.activeCampaignId;
+  const session = campaign?.sessoes?.find((item) => isActiveCampaign && item.id === state.activeSessionId) || campaign?.sessoes?.[0];
   return {
     id: campaign.id,
     owner_id: ownerId,
@@ -1288,8 +1355,11 @@ function campaignDatabaseRow(campaign, now = new Date().toISOString(), user = cu
     nome: campaign.nome,
     invite_code: payload.invite_code,
     codigo_convite: payload.codigo_convite,
-    objetivo_atual: currentSession()?.mission || campaign.sessoes?.[0]?.mission || "",
-    local_atual: state.map?.name || "",
+    grid_rows: payload.grid_rows || 17,
+    grid_cols: payload.grid_cols || 32,
+    active_scene_id: payload.active_scene_id || "",
+    objetivo_atual: session?.mission || session?.resumo || "",
+    local_atual: session?.mapa?.name || (isActiveCampaign ? state.map?.name : "") || "",
     payload,
     updated_at: now
   };
@@ -1301,10 +1371,23 @@ function sheetCampaignId(sheetId) {
 
 function sheetDatabaseRow(sheet, user, now = new Date().toISOString()) {
   const safeSheet = normalizeSheet(sheet);
+  const campaignId = uuidOrNull(safeSheet.campanha_id || safeSheet.campanhaId) || uuidOrNull(sheetCampaignId(safeSheet.id));
+  const origin = safeSheet.origem || "jogador";
+  const ownerId = uuidOrNull(safeSheet.owner_id || safeSheet.ownerId) || uuidOrNull(user.id);
+  const responsibleId = uuidOrNull(safeSheet.responsavel_id || safeSheet.responsavelId) || uuidOrNull(user.id);
   return {
     id: safeSheet.id,
-    user_id: uuidOrNull(user.id),
-    campanha_id: uuidOrNull(sheetCampaignId(safeSheet.id)),
+    user_id: origin === "sessao" ? responsibleId || ownerId : uuidOrNull(user.id),
+    owner_id: ownerId,
+    responsavel_id: responsibleId,
+    campanha_id: campaignId,
+    origem: origin,
+    edit_locked: safeSheet.editLocked === true,
+    edit_allowed_by_master: safeSheet.editAllowedByMaster === true,
+    download_allowed: safeSheet.downloadAllowed === true,
+    migrada: safeSheet.migrada === true,
+    migrated_to_personagem_id: uuidOrNull(safeSheet.migratedToPersonagemId || safeSheet.migrated_to_personagem_id),
+    sistema_regra: sheetSystemId(safeSheet),
     nome: safeSheet.name || "Agente",
     jogador: safeSheet.player || user.username || "",
     atributos: {
@@ -1363,6 +1446,33 @@ async function upsertSheetsOnline(rows) {
   }
   console.error("[Supabase] Erro Supabase", { table: "personagens", rows, error });
   throw new Error(`personagens: ${remoteErrorMessage(error)}`);
+}
+
+async function upsertCampaignsOnline(rows) {
+  const client = supabaseClient();
+  if (!client || !rows.length) return;
+  const { error } = await client.from("campanhas").upsert(rows, { onConflict: "id" });
+  if (!error) {
+    console.log("[Supabase] Campanha criada/atualizada no Supabase", rows.map((row) => row.codigo_convite));
+    console.log("Tamanho do grid salvo", rows.map((row) => ({ id: row.id, rows: row.grid_rows, cols: row.grid_cols })));
+    return;
+  }
+  if (isMissingColumnError(error)) {
+    console.warn("[Supabase] Colunas novas de campanha ausentes. Usando fallback minimo. Rode supabase-migration.sql.", error);
+    const fallbackRows = rows.map((row) => {
+      const safe = { ...row };
+      delete safe.grid_rows;
+      delete safe.grid_cols;
+      delete safe.active_scene_id;
+      return safe;
+    });
+    const retry = await client.from("campanhas").upsert(fallbackRows, { onConflict: "id" });
+    if (!retry.error) return;
+    console.error("[Supabase] Erro Supabase", { table: "campanhas", rows: fallbackRows, error: retry.error });
+    throw new Error(`campanhas: ${remoteErrorMessage(retry.error)}`);
+  }
+  console.error("[Supabase] Erro Supabase", { table: "campanhas", rows, error });
+  throw new Error(`campanhas: ${remoteErrorMessage(error)}`);
 }
 
 function replaceSheetId(oldId, newId) {
@@ -1454,11 +1564,7 @@ async function migrateLocalWorkspaceToSupabase(user = currentUser()) {
     safeCampaign.mestreId = uuidOrNull(safeCampaign.mestreId) || user.id;
     user.campaignIds = mergeUnique([...(user.campaignIds || []), safeCampaign.id]);
     console.log(existing ? "[Supabase] Campanha local ja existia no Supabase" : "[Supabase] Campanha criada no Supabase", safeCampaign.nome);
-    const { error } = await client.from("campanhas").upsert(campaignDatabaseRow(safeCampaign, now, user), { onConflict: "id" });
-    if (error) {
-      console.error("[Supabase] Erro Supabase", { table: "campanhas", campaign: safeCampaign, error });
-      throw new Error(`campanhas: ${remoteErrorMessage(error)}`);
-    }
+    await upsertCampaignsOnline([campaignDatabaseRow(safeCampaign, now, user)]);
   }
 
   const rows = [];
@@ -1495,7 +1601,7 @@ function inventoryRowsForSheet(sheet, user, now, rich = true) {
     const base = {
       user_id: user.id,
       personagem_id: sheet.id,
-      campanha_id: uuidOrNull(state.campaigns.find((campaign) => (campaign.personagens || []).includes(sheet.id))?.id),
+      campanha_id: uuidOrNull(sheet.campanha_id || sheet.campanhaId) || uuidOrNull(state.campaigns.find((campaign) => (campaign.personagens || []).includes(sheet.id))?.id),
       nome: item.name,
       payload: {
         name: item.name,
@@ -1547,12 +1653,7 @@ async function saveOnlineState() {
       .filter((campaign) => uuidOrNull(campaign.owner_id) && uuidOrNull(campaign.mestre_id));
     const sheets = userSheetsForSave(user).map((sheet) => sheetDatabaseRow(sheet, user, now));
     if (campaigns.length) {
-      const { error } = await client.from("campanhas").upsert(campaigns, { onConflict: "id" });
-      if (error) {
-        console.error("[Supabase] Erro Supabase", { table: "campanhas", campaigns, error });
-        throw new Error(`campanhas: ${remoteErrorMessage(error)}`);
-      }
-      console.log("[Supabase] Campanha criada no Supabase", campaigns.map((campaign) => campaign.codigo_convite));
+      await upsertCampaignsOnline(campaigns);
     }
     if (sheets.length) {
       await upsertSheetsOnline(sheets);
@@ -1567,6 +1668,14 @@ async function saveOnlineState() {
           console.warn("[Supabase] Erro ao salvar item com colunas D&D. Tentando fallback em payload.", insertResult.error);
           insertResult = await client.from("inventario").insert(inventoryRowsForSheet(sheet, user, now, false));
         }
+        if (insertResult.error && isMissingColumnError(insertResult.error)) {
+          const safeRows = inventoryRowsForSheet(sheet, user, now, false).map((row) => {
+            const safe = { ...row };
+            delete safe.campanha_id;
+            return safe;
+          });
+          insertResult = await client.from("inventario").insert(safeRows);
+        }
         if (insertResult.error) {
           console.error("[Supabase] Erro ao salvar item", insertResult.error);
           throw new Error(`inventario: ${remoteErrorMessage(insertResult.error)}`);
@@ -1577,7 +1686,7 @@ async function saveOnlineState() {
         const { error } = await client.from("anotacoes").insert({
           user_id: user.id,
           personagem_id: sheet.id,
-          campanha_id: uuidOrNull(state.campaigns.find((campaign) => (campaign.personagens || []).includes(sheet.id))?.id),
+          campanha_id: uuidOrNull(sheet.campanha_id || sheet.campanhaId) || uuidOrNull(state.campaigns.find((campaign) => (campaign.personagens || []).includes(sheet.id))?.id),
           titulo: `Anotacoes de ${sheet.name || "agente"}`,
           conteudo: sheet.notes || "",
           payload: {
@@ -1657,9 +1766,9 @@ function createCampaignForCurrentUser(name, systemId = "arquivo") {
   user.campaignIds = Array.from(new Set([...(user.campaignIds || []), campaign.id]));
   state.activeCampaignId = campaign.id;
   state.activeSessionId = campaign.sessoes[0].id;
-  addActiveSheetToCampaign(campaign);
-  seedSessionTokensFromSheets(campaign, campaign.sessoes[0]);
   applySessionToTable(campaign.sessoes[0]);
+  state.tokens = [];
+  console.log("[Campanha] Campanha nova criada zerada", { campanha_id: campaign.id, grid: `${campaign.sessoes[0].mapa.rows}x${campaign.sessoes[0].mapa.cols}` });
   return campaign;
 }
 
@@ -1773,6 +1882,7 @@ async function refreshActiveCampaignFromSupabase({ rerender = false } = {}) {
     return null;
   }
 
+  console.log("Carregando escudo do mestre", { campanha_id: localCampaign.id });
   setSyncStatus("Atualizando campanha pelo Supabase...");
   const filters = campaignLookupFilters(localCampaign);
   const campaignQuery = filters.length
@@ -1802,9 +1912,14 @@ async function refreshActiveCampaignFromSupabase({ rerender = false } = {}) {
     .from("personagens")
     .select("*")
     .eq("campanha_id", campaign.id);
-  if (charactersError) throw new Error(`personagens: ${remoteErrorMessage(charactersError)}`);
+  if (charactersError) {
+    console.error("Erro ao carregar escudo do mestre", charactersError);
+    throw new Error(`personagens: ${remoteErrorMessage(charactersError)}`);
+  }
 
   const linkedRows = Array.isArray(characterRows) ? characterRows.filter((row) => row.campanha_id === campaign.id) : [];
+  if (linkedRows.length) console.log("Personagens encontrados para campanha", { campanha_id: campaign.id, total: linkedRows.length });
+  else console.log("Nenhum personagem encontrado para campanha", { campanha_id: campaign.id });
   const userIds = linkedRows.map((row) => uuidOrNull(row.user_id)).filter(Boolean);
   let userMap = {};
   if (userIds.length) {
@@ -1814,22 +1929,43 @@ async function refreshActiveCampaignFromSupabase({ rerender = false } = {}) {
       .in("id", Array.from(new Set(userIds)));
     if (!usersError && Array.isArray(userRows)) {
       userMap = Object.fromEntries(userRows.map((row) => [row.id, row]));
+      userRows.forEach((row) => upsertLocalAccount({ id: row.id, username: row.username || row.email || "jogador", email: row.email || "", role: "player", sheetIds: [], campaignIds: [campaign.id], online: true }));
     }
   }
 
   const linkedSheets = linkedRows.map((row) => normalizeSheet({
     ...(row.payload || {}),
     id: row.id,
+    user_id: row.user_id,
+    owner_id: row.owner_id,
+    responsavel_id: row.responsavel_id,
+    campanha_id: row.campanha_id,
+    origem: row.origem,
+    edit_locked: row.edit_locked,
+    edit_allowed_by_master: row.edit_allowed_by_master,
+    download_allowed: row.download_allowed,
+    migrada: row.migrada,
+    migrated_to_personagem_id: row.migrated_to_personagem_id,
     name: row.payload?.name || row.nome || row.name || "Agente",
     player: row.payload?.player || userMap[row.user_id]?.username || row.nome || "Jogador"
-  }));
+  })).filter((sheet) => {
+    if (sheetOrigin(sheet) === "sessao") console.log("Ficha da sessao adicionada ao escudo", sheet.id);
+    else console.log("Ficha vinculada por convite adicionada ao escudo", sheet.id);
+    return sheetMatchesCampaign(sheet, campaign);
+  });
 
   const linkedIds = linkedSheets.map((sheet) => uuidOrNull(sheet.id)).filter(Boolean);
   if (linkedIds.length) {
-    const { data: inventoryRows, error: inventoryError } = await client
+    let { data: inventoryRows, error: inventoryError } = await client
       .from("inventario")
       .select("*")
-      .in("personagem_id", linkedIds);
+      .in("personagem_id", linkedIds)
+      .eq("campanha_id", campaign.id);
+    if (inventoryError && isMissingColumnError(inventoryError)) {
+      const retry = await client.from("inventario").select("*").in("personagem_id", linkedIds);
+      inventoryRows = retry.data;
+      inventoryError = retry.error;
+    }
     if (inventoryError) {
       console.warn("[Supabase] Nao consegui carregar inventarios vinculados.", inventoryError);
     } else {
@@ -2001,9 +2137,11 @@ async function loadGridTokensFromSupabase({ seedIfEmpty = true } = {}) {
       state.tokens = data.map(tokenFromGridRow);
       syncCurrentSession();
       renderGridSyncUpdate();
+      console.log("Grid carregado do Supabase", { campanha_id: campaignId, cena_id: sceneId, tokens: state.tokens.length });
       return;
     }
-    if (seedIfEmpty && state.tokens.length) await upsertGridTokens(state.tokens, "full");
+    console.log("Grid carregado do Supabase", { campanha_id: campaignId, cena_id: sceneId, tokens: 0 });
+    if (seedIfEmpty && state.tokens.length && (campaign?.personagens || []).length) await upsertGridTokens(state.tokens, "full");
   } finally {
     console.timeEnd("carregar_grid");
   }
@@ -2085,8 +2223,13 @@ function startRealtimeSync(mode = state.currentMode) {
     });
   sheetRealtimeChannel = client
     .channel(`personagens:${campaignId}`)
-    .on("postgres_changes", { event: "UPDATE", schema: "public", table: "personagens", filter: `campanha_id=eq.${campaignId}` }, (payload) => {
+    .on("postgres_changes", { event: "*", schema: "public", table: "personagens", filter: `campanha_id=eq.${campaignId}` }, (payload) => {
       try {
+        if (payload.eventType === "DELETE") {
+          state.sheets = state.sheets.filter((sheet) => sheet.id !== payload.old?.id);
+          renderMasterShield();
+          return;
+        }
         applyRemoteSheetRow(payload.new);
         console.log("Ficha atualizada", payload.new?.id);
       } catch (error) {
@@ -2128,7 +2271,23 @@ function stopRealtimeSync() {
 
 function applyRemoteSheetRow(row) {
   if (!row?.id) return;
-  const remote = normalizeSheet({ ...(row.payload || {}), id: row.id, name: row.payload?.name || row.nome || "", player: row.payload?.player || row.jogador || "" });
+  const remote = normalizeSheet({
+    ...(row.payload || {}),
+    id: row.id,
+    user_id: row.user_id,
+    owner_id: row.owner_id,
+    responsavel_id: row.responsavel_id,
+    campanha_id: row.campanha_id,
+    origem: row.origem,
+    edit_locked: row.edit_locked,
+    edit_allowed_by_master: row.edit_allowed_by_master,
+    download_allowed: row.download_allowed,
+    migrada: row.migrada,
+    migrated_to_personagem_id: row.migrated_to_personagem_id,
+    name: row.payload?.name || row.nome || "",
+    player: row.payload?.player || row.jogador || ""
+  });
+  if (!sheetVisibleToCurrentUser(remote)) return;
   const index = state.sheets.findIndex((sheet) => sheet.id === remote.id);
   if (index >= 0) state.sheets[index] = normalizeSheet({ ...state.sheets[index], ...remote });
   else state.sheets.push(remote);
@@ -2183,7 +2342,7 @@ async function saveSheetFieldOnline(sheet, field) {
 function applyRemoteGridCampaign(row) {
   const localCampaign = currentCampaign();
   if (!row || !localCampaign) return false;
-  const remoteCampaign = normalizeCampaignRecord({ ...(row.payload || {}), id: row.id });
+  const remoteCampaign = normalizeCampaignRecord({ ...(row.payload || {}), ...row, id: row.id });
   const activeSessionId = state.activeSessionId || localCampaign.sessoes?.[0]?.id;
   const remoteSession = remoteCampaign.sessoes.find((session) => session.id === activeSessionId) || remoteCampaign.sessoes[0];
   if (!remoteSession) return false;
@@ -2198,6 +2357,8 @@ function applyRemoteGridCampaign(row) {
   state.activeSessionId = remoteSession.id;
   applySessionToTable(remoteSession);
   syncCurrentSession();
+  console.log("Tamanho do grid recebido via Realtime", { rows: state.map.rows, cols: state.map.cols, campanha_id: mergedCampaign.id });
+  console.log("Grid redesenhado para jogador");
   return true;
 }
 
@@ -2225,6 +2386,7 @@ async function refreshGridFromSupabase() {
     renderGridSyncUpdate();
     setSyncStatus("Grid sincronizado com a mesa.");
   } catch (error) {
+    console.warn("Erro ao sincronizar tamanho do grid", error);
     console.warn("[Supabase] Falha ao sincronizar grid.", error);
   } finally {
     gridSyncRunning = false;
@@ -2281,14 +2443,27 @@ function addActiveSheetToCampaign(campaign, options = {}) {
     if (options.strict) throw new Error(systemMismatchMessage(sheet, campaign));
     return false;
   }
+  const user = currentUser();
+  sheet.campanha_id = campaign.id;
+  sheet.campanhaId = campaign.id;
+  sheet.owner_id = uuidOrNull(sheet.owner_id || sheet.ownerId) || uuidOrNull(user?.id);
+  sheet.ownerId = sheet.owner_id;
+  sheet.responsavel_id = uuidOrNull(sheet.responsavel_id || sheet.responsavelId) || uuidOrNull(user?.id);
+  sheet.responsavelId = sheet.responsavel_id;
+  sheet.origem = sheet.origem || "jogador";
+  sheet.edit_locked = false;
+  sheet.editLocked = false;
+  sheet.edit_allowed_by_master = true;
+  sheet.editAllowedByMaster = true;
   campaign.personagens = Array.from(new Set([...(campaign.personagens || []), sheet.id]));
   return true;
 }
 
 function sheetsLinkedToCampaign(campaign) {
-  return (campaign?.personagens || [])
-    .map((id) => state.sheets.find((sheet) => sheet.id === id))
-    .filter(Boolean)
+  if (!campaign) return [];
+  const linkedIds = new Set(campaign.personagens || []);
+  return state.sheets
+    .filter((sheet) => linkedIds.has(sheet.id) || sheetCampaignIdValue(sheet) === campaign.id)
     .map(normalizeSheet)
     .filter((sheet) => sheetMatchesCampaign(sheet, campaign));
 }
@@ -3323,34 +3498,51 @@ function renderMasterShield() {
   if (!els.masterShield) return;
   const campaign = currentCampaign();
   const linked = sheetsLinkedToCampaign(campaign);
+  console.log("Carregando escudo do mestre", { campanha_id: campaign?.id || "", totalLocal: linked.length });
   if (!linked.length) {
-    els.masterShield.innerHTML = `<p>Nenhuma ficha vinculada.</p>`;
-    return;
-  }
-  els.masterShield.innerHTML = linked.map((sheet) => {
-    const token = state.tokens.find((item) => item.sheetId === sheet.id);
-    return `
-      <article class="shield-agent">
-        <b>${escapeHtml(sheet.name || "Agente")}</b>
-        <span>${escapeHtml(sheet.player || "Jogador")} | ${escapeHtml(sheet.className || "Sem classe")} | ${escapeHtml(sheet.nex || "5%")}</span>
-        <div class="shield-bars">
-          ${shieldBar("PV", sheet.hp, sheet.hpMax, "#a82924")}
-          ${shieldBar("PE", sheet.pe, sheet.peMax, "#d08a22")}
-          ${shieldBar("SAN", sheet.san, sheet.sanMax, "#7c3bd1")}
-        </div>
-        <small>Def ${escapeHtml(sheet.defense ?? 10)} | Luz ${escapeHtml(token?.light ?? inventoryVisionBonus(sheet))} | ${token ? `Token ${token.x + 1},${token.y + 1}` : "Sem token"}</small>
-        <div class="damage-inline">
-          <input data-shield-damage="${escapeAttr(sheet.id)}" type="number" min="0" placeholder="Dano" />
-          <button type="button" data-shield-damage-apply="${escapeAttr(sheet.id)}">Dano</button>
-          <button type="button" data-shield-heal-apply="${escapeAttr(sheet.id)}">Cura</button>
-        </div>
-        <div class="shield-shortcuts">
-          <button type="button" data-shield-open-sheet="${escapeAttr(sheet.id)}">Ficha</button>
-          <button type="button" data-shield-open-inventory="${escapeAttr(sheet.id)}">Inventario</button>
-        </div>
-      </article>
+    els.masterShield.innerHTML = `
+      ${isMasterMode() ? `<div class="master-shield-actions"><button type="button" data-create-session-sheet>Criar ficha da sessao</button></div>` : ""}
+      <p>Nenhuma ficha vinculada.</p>
     `;
-  }).join("");
+  } else {
+    els.masterShield.innerHTML = `
+      ${isMasterMode() ? `<div class="master-shield-actions"><button type="button" data-create-session-sheet>Criar ficha da sessao</button></div>` : ""}
+      ${linked.map((sheet) => {
+        const token = state.tokens.find((item) => item.sheetId === sheet.id);
+        const sessionSheet = sheetOrigin(sheet) === "sessao";
+        return `
+          <article class="shield-agent">
+            <b>${escapeHtml(sheet.name || "Agente")}</b>
+            <span>${escapeHtml(sheet.player || "Jogador")} | ${escapeHtml(sheet.className || sheet.fichaCategoria || "Sem classe")} | ${escapeHtml(sheet.nex || sheet.rank || "5%")}</span>
+            <small>${sessionSheet ? "Ficha da sessao" : "Ficha do jogador"}${sheet.editLocked ? " | Bloqueada" : " | Edicao liberada"}</small>
+            <div class="shield-bars">
+              ${shieldBar("PV", sheet.hp, sheet.hpMax, "#a82924")}
+              ${shieldBar("PE", sheet.pe, sheet.peMax, "#d08a22")}
+              ${shieldBar("SAN", sheet.san, sheet.sanMax, "#7c3bd1")}
+            </div>
+            <small>Def ${escapeHtml(sheet.defense ?? 10)} | Luz ${escapeHtml(token?.light ?? inventoryVisionBonus(sheet))} | ${token ? `Token ${token.x + 1},${token.y + 1}` : "Sem token"}</small>
+            <div class="damage-inline">
+              <input data-shield-damage="${escapeAttr(sheet.id)}" type="number" min="0" placeholder="Dano" />
+              <button type="button" data-shield-damage-apply="${escapeAttr(sheet.id)}">Dano</button>
+              <button type="button" data-shield-heal-apply="${escapeAttr(sheet.id)}">Cura</button>
+            </div>
+            <div class="shield-shortcuts">
+              <button type="button" data-shield-open-sheet="${escapeAttr(sheet.id)}">Ficha</button>
+              <button type="button" data-shield-open-inventory="${escapeAttr(sheet.id)}">Inventario</button>
+              ${isMasterMode() && sessionSheet ? `<button type="button" data-session-sheet-lock="${escapeAttr(sheet.id)}">${sheet.editLocked ? "Liberar edicao" : "Travar edicao"}</button><button type="button" data-session-sheet-migrate="${escapeAttr(sheet.id)}">Migrar para jogador</button>` : ""}
+            </div>
+          </article>
+        `;
+      }).join("")}
+    `;
+  }
+  els.masterShield.querySelector("[data-create-session-sheet]")?.addEventListener("click", createSessionSheetByMaster);
+  els.masterShield.querySelectorAll("[data-session-sheet-lock]").forEach((button) => {
+    button.addEventListener("click", () => toggleSessionSheetLock(button.dataset.sessionSheetLock));
+  });
+  els.masterShield.querySelectorAll("[data-session-sheet-migrate]").forEach((button) => {
+    button.addEventListener("click", () => migrateSessionSheetToPlayer(button.dataset.sessionSheetMigrate));
+  });
   els.masterShield.querySelectorAll("[data-shield-damage-apply]").forEach((button) => {
     button.addEventListener("click", () => {
       const input = els.masterShield.querySelector(`[data-shield-damage="${selectorEscape(button.dataset.shieldDamageApply)}"]`);
@@ -3384,6 +3576,161 @@ function shieldBar(label, current, max, color) {
   const safeCurrent = Math.max(0, Number(current) || 0);
   const pct = Math.max(0, Math.min(100, (safeCurrent / safeMax) * 100));
   return `<label><span>${label} ${escapeHtml(safeCurrent)} / ${escapeHtml(safeMax)}</span><i style="--bar:${pct}%;--bar-color:${color}"></i></label>`;
+}
+
+function sessionPlayerHint() {
+  const campaign = currentCampaign();
+  const ids = mergeUnique([...(campaign?.jogadores || []), ...state.sheets.map((sheet) => sheet.responsavelId || sheet.ownerId || sheet.user_id)]);
+  const names = ids.map((id) => {
+    const account = state.accounts.find((item) => item.id === id);
+    return account ? `${account.username} (${account.id})` : id;
+  }).filter(Boolean);
+  return names.length ? `\nJogadores: ${names.join(", ")}` : "";
+}
+
+function resolveUserIdFromInput(value) {
+  const clean = String(value || "").trim();
+  if (!clean) return "";
+  if (uuidOrNull(clean)) return clean;
+  const account = state.accounts.find((item) =>
+    normalizeKey(item.username) === normalizeKey(clean) ||
+    normalizeKey(item.email) === normalizeKey(clean)
+  );
+  return uuidOrNull(account?.id) || "";
+}
+
+async function createSessionSheetByMaster() {
+  if (!isMasterMode()) return;
+  const campaign = currentCampaign();
+  const user = currentUser();
+  if (!campaign || !uuidOrNull(campaign.id)) {
+    window.alert("Selecione uma campanha salva antes de criar ficha da sessao.");
+    return;
+  }
+  const system = systemFor(campaignSystemId(campaign));
+  const name = window.prompt("Nome do personagem/ficha da sessao:", system.id === "dnd5e" ? "Novo aventureiro da sessao" : "Novo agente da sessao");
+  if (!name) return;
+  const type = window.prompt("Tipo da ficha: Personagem da sessao, NPC, Aliado, Monstro ou Temporario", "Personagem da sessao") || "Personagem da sessao";
+  const responsibleInput = window.prompt(`Jogador vinculado (usuario, email ou UUID). Deixe vazio para NPC/monstro.${sessionPlayerHint()}`, "") || "";
+  const responsibleId = resolveUserIdFromInput(responsibleInput);
+  const unlocked = window.confirm("Liberar edicao para o jogador vinculado agora?");
+  const sheet = normalizeSheet({
+    ...blankSheetForSystem(system.id, name, responsibleInput || user.username),
+    origem: "sessao",
+    fichaCategoria: type,
+    campanha_id: campaign.id,
+    campanhaId: campaign.id,
+    owner_id: user.id,
+    ownerId: user.id,
+    responsavel_id: responsibleId,
+    responsavelId: responsibleId,
+    user_id: responsibleId || user.id,
+    edit_locked: !unlocked,
+    editLocked: !unlocked,
+    edit_allowed_by_master: unlocked,
+    editAllowedByMaster: unlocked,
+    download_allowed: false,
+    migrada: false
+  });
+  state.sheets.unshift(sheet);
+  campaign.personagens = mergeUnique([...(campaign.personagens || []), sheet.id]);
+  if (responsibleId) campaign.jogadores = mergeUnique([...(campaign.jogadores || []), responsibleId]);
+  state.activeSheetId = sheet.id;
+  masterInventorySheetId = sheet.id;
+  seedSessionTokensFromSheets(campaign, currentSession());
+  try {
+    await upsertSheetsOnline([sheetDatabaseRow(sheet, user)]);
+    await saveOnlineState();
+    setSyncStatus("Ficha da sessao criada no Supabase.");
+  } catch (error) {
+    setSyncStatus(`Ficha da sessao criada localmente. Falha online: ${error.message}`, true);
+  }
+  renderAll();
+}
+
+async function toggleSessionSheetLock(sheetId) {
+  if (!isMasterMode()) return;
+  const sheet = state.sheets.find((item) => item.id === sheetId);
+  if (!sheet) return;
+  const locked = !(sheet.editLocked === true);
+  sheet.editLocked = locked;
+  sheet.edit_locked = locked;
+  sheet.editAllowedByMaster = !locked;
+  sheet.edit_allowed_by_master = !locked;
+  const client = supabaseClient();
+  try {
+    if (client && uuidOrNull(sheet.id)) {
+      const { error } = await client.from("personagens").update({
+        edit_locked: locked,
+        edit_allowed_by_master: !locked,
+        payload: normalizeSheet(sheet),
+        updated_at: new Date().toISOString()
+      }).eq("id", sheet.id);
+      if (error) throw new Error(`personagens: ${remoteErrorMessage(error)}`);
+    }
+    setSyncStatus(locked ? "Ficha bloqueada pelo mestre." : "Edicao liberada pelo mestre.");
+  } catch (error) {
+    setSyncStatus(`Nao consegui salvar a trava no Supabase: ${error.message}`, true);
+  }
+  renderAll();
+}
+
+async function migrateSessionSheetToPlayer(sheetId) {
+  if (!isMasterMode()) return;
+  const user = currentUser();
+  const source = state.sheets.find((item) => item.id === sheetId);
+  const sheet = normalizeSheet(source || {});
+  if (!sheet?.id || sheetOrigin(sheet) !== "sessao") return;
+  const responsibleId = uuidOrNull(sheet.responsavelId || sheet.responsavel_id) || resolveUserIdFromInput(window.prompt(`Migrar para qual jogador?${sessionPlayerHint()}`, sheet.player || "") || "");
+  if (!responsibleId) {
+    window.alert("Informe um jogador valido para receber a copia.");
+    return;
+  }
+  const target = state.accounts.find((account) => account.id === responsibleId);
+  const copy = normalizeSheet({
+    ...sheet,
+    id: crypto.randomUUID(),
+    origem: "jogador",
+    campanha_id: "",
+    campanhaId: "",
+    owner_id: responsibleId,
+    ownerId: responsibleId,
+    responsavel_id: responsibleId,
+    responsavelId: responsibleId,
+    user_id: responsibleId,
+    player: target?.username || sheet.player || "Jogador",
+    edit_locked: false,
+    editLocked: false,
+    edit_allowed_by_master: true,
+    editAllowedByMaster: true,
+    download_allowed: true,
+    migrada: false,
+    migrated_to_personagem_id: "",
+    migratedToPersonagemId: ""
+  });
+  source.migrada = true;
+  source.migratedToPersonagemId = copy.id;
+  source.migrated_to_personagem_id = copy.id;
+  state.sheets.unshift(copy);
+  if (target) target.sheetIds = mergeUnique([...(target.sheetIds || []), copy.id]);
+  const client = supabaseClient();
+  try {
+    await upsertSheetsOnline([sheetDatabaseRow(copy, { ...user, id: responsibleId, username: copy.player })]);
+    if (client) {
+      const { error } = await client.from("personagens").update({
+        migrada: true,
+        migrated_to_personagem_id: copy.id,
+        payload: normalizeSheet(source),
+        updated_at: new Date().toISOString()
+      }).eq("id", sheet.id);
+      if (error) throw new Error(`personagens: ${remoteErrorMessage(error)}`);
+      if (target) await saveOnlineUser(target);
+    }
+    setSyncStatus("Ficha migrada para Minhas Fichas do jogador.");
+  } catch (error) {
+    setSyncStatus(`Migracao local feita, mas Supabase falhou: ${error.message}`, true);
+  }
+  renderAll();
 }
 
 function addToken(source = "sidebar") {
@@ -3893,6 +4240,10 @@ function dndStatInput(sheet, field, label, name) {
 
 function updateDndSheetField(field, value, numeric = false, rerender = false) {
   const sheet = ensureActiveSheet();
+  if (!canEditSheet(sheet)) {
+    setSyncStatus("Ficha bloqueada pelo mestre.", true);
+    return;
+  }
   sheet.dnd = { ...(sheet.dnd || {}) };
   sheet.dnd[field] = numeric ? Number(value) : value;
   if (field === "classe") {
@@ -3933,6 +4284,10 @@ function updateDndSheetField(field, value, numeric = false, rerender = false) {
 
 function updateDndCollection(collection, key, value, rerender = true) {
   const sheet = ensureActiveSheet();
+  if (!canEditSheet(sheet)) {
+    setSyncStatus("Ficha bloqueada pelo mestre.", true);
+    return;
+  }
   sheet.dnd = { ...(sheet.dnd || {}), [collection]: { ...(sheet.dnd?.[collection] || {}) } };
   sheet.dnd[collection][key] = value;
   if (rerender) localOnlyRender();
@@ -4281,6 +4636,7 @@ function renderDndSheet(sheet) {
     </section>
   `;
   els.crisisSheet.innerHTML = dndHeroSheetMarkup(sheet, derived, spellSlots);
+  applySheetEditState(sheet);
 
   els.crisisSheet.querySelectorAll("[data-sheet-field]").forEach((field) => {
     field.addEventListener("input", () => updateActiveSheet(field.dataset.sheetField, field.value, field.type === "number", false));
@@ -4467,6 +4823,7 @@ function renderCrisisSheet() {
       </div>
     </section>
   `;
+  applySheetEditState(sheet);
 
   els.crisisSheet.querySelectorAll("[data-sheet-field]").forEach((field) => {
     field.addEventListener("input", () => updateActiveSheet(field.dataset.sheetField, field.value, field.type === "number", false));
@@ -6778,6 +7135,10 @@ function emptyCatalogText(field) {
 
 function removeSheetLine(field, index) {
   const sheet = ensureActiveSheet();
+  if (!canEditSheet(sheet)) {
+    setSyncStatus("Ficha bloqueada pelo mestre.", true);
+    return;
+  }
   const lines = ["abilities", "rituals"].includes(field) ? splitSheetEntries(sheet[field]) : splitLines(sheet[field]);
   lines.splice(index, 1);
   sheet[field] = lines.join("\n");
@@ -7063,6 +7424,10 @@ function recalculateDerivedStats(sheet, changedField = "") {
 
 function updateActiveSheet(field, value, numeric = false, rerender = true) {
   const sheet = ensureActiveSheet();
+  if (!canEditSheet(sheet)) {
+    setSyncStatus("Ficha bloqueada pelo mestre.", true);
+    return;
+  }
   const previousNex = parseNex(sheet.nex);
   sheet[field] = numeric ? Number(value) : value;
   if (["agi", "str", "int", "pre", "vig", "className", "pathName", "nex", "inventory", "skills"].includes(field)) {
@@ -7122,9 +7487,40 @@ function syncSheetToken(sheet = ensureActiveSheet()) {
 }
 
 function canEditSheetVitals(sheetId) {
+  const sheet = state.sheets.find((item) => item.id === sheetId);
+  if (sheet && !canEditSheet(sheet)) return false;
   const user = currentUser();
   if (isMasterMode()) return true;
   return Boolean(user && (user.sheetIds || []).includes(sheetId));
+}
+
+function canEditSheet(sheet) {
+  const safeSheet = normalizeSheet(sheet || {});
+  const user = currentUser();
+  if (!user) return false;
+  if (isMasterMode()) return true;
+  if ((user.sheetIds || []).includes(safeSheet.id)) return true;
+  const responsible = uuidOrNull(safeSheet.responsavelId || safeSheet.responsavel_id);
+  if (responsible === user.id) return safeSheet.editLocked !== true && safeSheet.editAllowedByMaster === true;
+  return false;
+}
+
+function applySheetEditState(sheet) {
+  if (!els.crisisSheet) return;
+  const canEdit = canEditSheet(sheet);
+  els.crisisSheet.classList.toggle("sheet-locked-by-master", !canEdit);
+  els.crisisSheet.querySelector(".sheet-lock-notice")?.remove();
+  if (!canEdit) {
+    els.crisisSheet.insertAdjacentHTML("afterbegin", `<div class="sheet-lock-notice">Ficha bloqueada pelo mestre.</div>`);
+  } else if (sheetOrigin(sheet) === "sessao" && sheet.editAllowedByMaster) {
+    els.crisisSheet.insertAdjacentHTML("afterbegin", `<div class="sheet-lock-notice unlocked">Edicao liberada pelo mestre.</div>`);
+  }
+  els.crisisSheet.querySelectorAll("input, textarea, select").forEach((field) => {
+    if (field.matches("[data-sheet-damage-value]")) return;
+    field.disabled = !canEdit;
+    if (!canEdit) field.setAttribute("aria-readonly", "true");
+    else field.removeAttribute("aria-readonly");
+  });
 }
 
 function applySheetDamage(sheetId, amount, mode = "damage") {
@@ -7196,6 +7592,10 @@ function uploadProfilePhoto(file) {
 
 function updateSkillMod(skill, field, value, rerender = true) {
   const sheet = ensureActiveSheet();
+  if (!canEditSheet(sheet)) {
+    setSyncStatus("Ficha bloqueada pelo mestre.", true);
+    return;
+  }
   sheet.skillMods = sheet.skillMods || {};
   sheet.skillMods[skill] = { ...(sheet.skillMods[skill] || {}), [field]: value };
   recalculateDerivedStats(sheet, "skills");
@@ -7210,6 +7610,10 @@ function updateSkillMod(skill, field, value, rerender = true) {
 
 function adjustSheetNumber(field, delta) {
   const sheet = ensureActiveSheet();
+  if (!canEditSheet(sheet)) {
+    setSyncStatus("Ficha bloqueada pelo mestre.", true);
+    return;
+  }
   sheet[field] = numberOr(sheet[field], 0) + delta;
   localOnlyRender();
   queueSheetPatch(sheet, field, 500);
@@ -7382,6 +7786,7 @@ function resizeGrid() {
     token.y = Math.min(token.y, state.map.rows - 1);
   });
   renderAll();
+  markMapStructureChanged();
 }
 
 function updateMapBackground(field, value) {
@@ -7580,8 +7985,8 @@ function renderSheets() {
   const user = currentUser();
   const campaign = currentCampaign();
   const visibleSheets = isMasterMode()
-    ? state.sheets.filter((sheet) => sheetMatchesCampaign(sheet, campaign) && (!campaign?.personagens?.length || (campaign.personagens || []).includes(sheet.id)))
-    : state.sheets.filter((sheet) => sheetMatchesCampaign(sheet, campaign) && (user?.sheetIds || []).includes(sheet.id));
+    ? state.sheets.filter((sheet) => sheetMatchesCampaign(sheet, campaign) && (!campaign?.id || sheetCampaignIdValue(sheet) === campaign.id || (campaign.personagens || []).includes(sheet.id)))
+    : state.sheets.filter((sheet) => sheetMatchesCampaign(sheet, campaign) && sheetVisibleToCurrentUser(sheet, campaign));
   visibleSheets.forEach((sheet) => {
     const safeSheet = normalizeSheet(sheet);
     const card = document.createElement("article");
@@ -7738,6 +8143,24 @@ function normalizeSheet(sheet) {
   const dnd = sheet.dnd || {};
   return {
     id: sheet.id || crypto.randomUUID(),
+    user_id: uuidOrNull(sheet.user_id || sheet.userId),
+    owner_id: uuidOrNull(sheet.owner_id || sheet.ownerId),
+    ownerId: uuidOrNull(sheet.ownerId || sheet.owner_id),
+    responsavel_id: uuidOrNull(sheet.responsavel_id || sheet.responsavelId),
+    responsavelId: uuidOrNull(sheet.responsavelId || sheet.responsavel_id),
+    campanha_id: uuidOrNull(sheet.campanha_id || sheet.campanhaId),
+    campanhaId: uuidOrNull(sheet.campanhaId || sheet.campanha_id),
+    origem: sheet.origem || sheet.origin || "jogador",
+    fichaCategoria: sheet.fichaCategoria || sheet.ficha_categoria || "Personagem",
+    edit_locked: sheet.edit_locked === true || sheet.editLocked === true,
+    editLocked: sheet.editLocked === true || sheet.edit_locked === true,
+    edit_allowed_by_master: sheet.edit_allowed_by_master === true || sheet.editAllowedByMaster === true,
+    editAllowedByMaster: sheet.editAllowedByMaster === true || sheet.edit_allowed_by_master === true,
+    download_allowed: sheet.download_allowed === true || sheet.downloadAllowed === true,
+    downloadAllowed: sheet.downloadAllowed === true || sheet.download_allowed === true,
+    migrada: sheet.migrada === true || sheet.migrated === true,
+    migrated_to_personagem_id: uuidOrNull(sheet.migrated_to_personagem_id || sheet.migratedToPersonagemId),
+    migratedToPersonagemId: uuidOrNull(sheet.migratedToPersonagemId || sheet.migrated_to_personagem_id),
     sistemaRegra: system.id,
     sistema_regra: system.id,
     fichaTipo: sheet.fichaTipo || sheet.ficha_tipo || system.ficha,
@@ -8962,6 +9385,7 @@ document.querySelector("#quickResizeGrid")?.addEventListener("click", () => {
     return x < state.map.cols && y < state.map.rows;
   });
   renderAll();
+  markMapStructureChanged();
 });
 document.querySelector("#quickAddToken")?.addEventListener("click", () => {
   if (isMasterMode()) addToken("quick");
