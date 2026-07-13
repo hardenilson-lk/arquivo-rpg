@@ -3,44 +3,74 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>arquivos</title>
+    <title>ORBE</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&family=IM+Fell+English:ital@0;1&family=Special+Elite&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;800&family=Courier+Prime:wght@400;700&family=Marcellus&family=Special+Elite&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="investigative-theme.css" />
+    <link rel="stylesheet" href="orbe-theme.css" />
+    <link rel="stylesheet" href="dnd-theme.css" />
+    <link rel="stylesheet" href="responsive.css" />
   </head>
   <body class="player-view">
     <section id="loginScreen" class="login-screen">
       <div class="login-photo" aria-hidden="true"></div>
+      <header class="orbe-login-topbar" aria-label="Navegacao inicial">
+        <div class="orbe-login-links">
+          <span class="orbe-compass" aria-hidden="true">+</span>
+          <button type="button">Sobre o ORBE</button>
+          <button type="button">Recursos</button>
+          <button type="button">Sistemas</button>
+          <button type="button">Planos</button>
+          <button type="button">Blog</button>
+          <button type="button">Ajuda</button>
+        </div>
+        <button class="orbe-language" type="button">Portugues (Brasil)</button>
+      </header>
       <form id="loginForm" class="login-folder paper-panel">
         <i class="paper-clip clip-sidebar" aria-hidden="true"></i>
         <div class="login-stamp">Confidencial</div>
-        <h1 class="typewriter-title failed-type">arquivos</h1>
-        <p>Sistema de Investigacao e Registro de Campanhas</p>
-        <h2>Acesso ao sistema</h2>
-        <label>Nome de usuario <input id="loginUser" type="text" autocomplete="username" placeholder="Digite seu usuario" /></label>
-        <label>Senha <span class="password-line"><input id="loginPassword" type="password" autocomplete="current-password" placeholder="Digite sua senha" /><button id="toggleLoginPassword" type="button">Mostrar</button></span></label>
-        <label class="check-row"><input id="rememberAccess" type="checkbox" /> Lembrar acesso</label>
-        <button id="loginSubmit" class="login-enter" type="submit">Entrar <span>-></span></button>
-        <div class="login-actions">
-          <button id="createAccess" type="button">Criar acesso</button>
-          <button id="inviteAccess" type="button">Entrar com convite</button>
+        <div class="orbe-login-brand">
+          <h1 class="orbe-logo-title"><img class="orbe-logo-image" src="./assets/orbe-logo.png" alt="ORBE" /></h1>
+          <p>plataforma para reunir sua mesa de RPG</p>
         </div>
-        <div class="login-secondary-actions">
-          <button id="recoverPassword" type="button">Recuperar senha</button>
-          <span id="serverStatusBadge" class="server-status offline">Servidor: verificando...</span>
+        <div class="orbe-login-card">
+          <h2>Acesso ao ORBE</h2>
+          <label>Nome de usuario <input id="loginUser" type="text" autocomplete="username" placeholder="Digite seu usuario" /></label>
+          <label>Senha <span class="password-line"><input id="loginPassword" type="password" autocomplete="current-password" placeholder="Digite sua senha" /><button id="toggleLoginPassword" type="button">Mostrar</button></span></label>
+          <div class="orbe-login-inline">
+            <label class="check-row"><input id="rememberAccess" type="checkbox" /> Lembrar acesso</label>
+            <button id="recoverPassword" type="button">Esqueceu sua senha?</button>
+          </div>
+          <button id="loginSubmit" class="login-enter" type="submit">Entrar <span>-></span></button>
+          <div class="orbe-login-divider"><span>ou</span></div>
+          <div class="login-actions">
+            <button id="createAccess" type="button">Criar conta</button>
+            <button id="inviteAccess" type="button">Entrar com convite</button>
+          </div>
+          <p class="login-error" id="loginError" aria-live="polite"></p>
+          <small>"Suas mesas, mundos e historias em um so lugar."</small>
         </div>
-        <p class="login-error" id="loginError" aria-live="polite"></p>
-        <small>"A verdade esta nos registros. O resto e interpretacao."</small>
       </form>
-      <aside class="login-crt">
-        <pre>&gt; SISTEMA ARQUIVOS v1.07
-&gt; INICIALIZANDO...
-&gt; VERIFICANDO ACESSO...
-&gt; AGUARDANDO CREDENCIAIS...
-&gt; _</pre>
+      <aside class="orbe-connection-panel orbe-orb-loading" aria-label="Status de conexao do ORBE">
+        <div class="orbe-rune-ring" aria-hidden="true">
+          <span>✦</span><span>◇</span><span>✧</span><span>✶</span><span>✦</span><span>◇</span>
+        </div>
+        <div class="orbe-status-orb" aria-hidden="true">
+          <i></i><i></i><i></i><i></i><i></i>
+        </div>
+        <div class="orbe-connection-copy">
+          <b id="serverStatusBadge" class="server-status offline">Aguardando acesso</b>
+          <span id="orbeConnectionDetail">Conexao com o ORBE em verificacao.</span>
+        </div>
       </aside>
+      <div class="orbe-login-benefits" aria-label="Beneficios do ORBE">
+        <span>Compatível com os principais sistemas de RPG</span>
+        <span>Seus dados e histórias sempre seguros</span>
+        <span>Tudo que sua mesa precisa em um só lugar</span>
+        <span>Feito para mestres e jogadores</span>
+      </div>
     </section>
 
     <section id="signupModal" class="signup-modal hidden" aria-label="Criar acesso">
@@ -62,79 +92,137 @@
     <section id="portalScreen" class="portal-screen hidden">
       <div class="portal-folder paper-panel">
         <header class="portal-head">
+          <nav class="orbe-top-nav" aria-label="Navegacao ORBE">
+            <button class="active" type="button" data-portal-page-button="inicio">Inicio</button>
+            <button type="button" data-portal-page-button="mesas">Mesas</button>
+            <button type="button" data-portal-page-button="fichas">Fichas</button>
+            <button type="button" data-portal-page-button="sistemas">Sistemas</button>
+            <button type="button" data-portal-page-button="biblioteca">Biblioteca</button>
+          </nav>
           <div>
-            <h1 class="typewriter-title failed-type">arquivos</h1>
-            <p id="portalSubtitle">Gerenciamento de campanhas, sessoes e fichas</p>
+            <h1 class="orbe-logo-title"><img class="orbe-logo-image" src="./assets/orbe-logo.png" alt="ORBE" /></h1>
+            <p id="portalSubtitle">Central de Criacao</p>
+            <p id="portalLoadStatus" class="sync-status">Pronto.</p>
           </div>
           <div class="portal-actions">
             <span id="portalUserBadge" class="access-level">USUARIO</span>
             <button id="logoutButton" type="button">Sair</button>
           </div>
         </header>
-        <section class="portal-intro">
-          <div>
-            <span class="intro-kicker">O Arquivo Sombrio</span>
-            <h2>A verdade nunca desaparece. Ela apenas espera ser encontrada.</h2>
-            <p>Cada investigacao e registrada como um Arquivo independente, com evidencias, personagens, locais e acontecimentos que desafiam qualquer explicacao racional.</p>
-          </div>
-          <dl>
-            <div><dt>Arquivos</dt><dd>Oneshots independentes</dd></div>
-            <div><dt>Fichas</dt><dd>Personagens salvos na conta</dd></div>
-            <div><dt>Campanhas</dt><dd>Casos conduzidos por mestres</dd></div>
-          </dl>
-        </section>
-        <section class="portal-about note-paper">
-          <div>
-            <h2>O Arquivo Sombrio</h2>
-            <p>Ha historias que jamais chegaram aos jornais. Casos encerrados sem respostas. Desaparecimentos inexplicaveis. Rituais esquecidos. Lugares onde a realidade parece se romper.</p>
-            <p>Durante decadas, relatos desse tipo foram ocultados, arquivados ou simplesmente apagados da memoria coletiva. Entretanto, alguem reuniu essas informacoes em um unico lugar.</p>
-            <p>Esse lugar e conhecido apenas como <strong>O Arquivo Sombrio</strong>.</p>
-            <p>Cada documento presente neste servidor representa um Arquivo: um caso independente contendo pessoas, evidencias, entidades, locais e acontecimentos que desafiam qualquer explicacao racional.</p>
-            <blockquote>A pergunta nao e se existe algo escondido. A pergunta e: ate onde voce esta disposto a ir para descobrir a verdade?</blockquote>
-          </div>
-          <div>
-            <h3>Estrutura do servidor</h3>
-            <ul>
-              <li>Cada investigacao e registrada como um Arquivo.</li>
-              <li>Cada Arquivo corresponde a uma Oneshot independente.</li>
-              <li>Evidencias, relatos, personagens e documentos permanecem armazenados para futuras consultas.</li>
-              <li>Alguns Arquivos podem estar conectados entre si. Outros jamais deveriam ser abertos.</li>
-            </ul>
-            <p><strong>Criador do universo e idealizador do projeto:</strong><br />Adenilson Lanna D. Hurley</p>
-          </div>
-        </section>
-        <div class="portal-grid">
-          <section class="portal-card">
-            <h2>Criar campanha</h2>
-            <label>Nome da campanha <input id="newCampaignName" type="text" placeholder="Nova campanha" /></label>
-            <button id="createCampaignButton" class="primary" type="button">Criar campanha</button>
+        <div class="portal-pages">
+          <section class="portal-page active" data-portal-page="inicio">
+            <section class="portal-intro">
+              <div>
+                <span class="intro-kicker">Central de Criacao</span>
+                <h2>Suas mesas, mundos e historias em um so lugar.</h2>
+                <p>ORBE organiza campanhas, fichas, mapas, rolagens, inventarios e arquivos de sessao em uma central feita para mestres e jogadores.</p>
+                <div class="portal-hero-actions">
+                  <button class="primary" type="button" data-portal-page-link="mesas">Criar ou abrir mesa</button>
+                  <button type="button" data-portal-page-link="fichas">Gerenciar fichas</button>
+                </div>
+              </div>
+              <dl>
+                <div><dt>Mesas</dt><dd>Campanhas com mestre, jogadores e convites</dd></div>
+                <div><dt>Fichas</dt><dd>Personagens separados por sistema de RPG</dd></div>
+                <div><dt>Mapas</dt><dd>Grid, tokens, rolagens e pistas em tempo real</dd></div>
+              </dl>
+            </section>
+            <section class="portal-home-showcase">
+              <article>
+                <span>01</span>
+                <h3>Escolha o sistema</h3>
+                <p>Arquivo, D&D 5e ou regras proprias, cada mesa mantem sua identidade e sua ficha correta.</p>
+              </article>
+              <article>
+                <span>02</span>
+                <h3>Monte a mesa</h3>
+                <p>Crie a campanha, envie convite e acompanhe quem entrou direto pelo painel do mestre.</p>
+              </article>
+              <article>
+                <span>03</span>
+                <h3>Jogue junto</h3>
+                <p>Fichas, inventario, mapas, chat, dados e arquivos ficam reunidos durante a sessao.</p>
+              </article>
+            </section>
           </section>
-          <section class="portal-card">
-            <h2>Criar ficha</h2>
-            <label>Nome do personagem <input id="newSheetName" type="text" placeholder="Novo agente" /></label>
-            <button id="createSheetButton" class="primary" type="button">Criar e abrir ficha</button>
-            <small id="sheetLimitInfo">Limite: 5 fichas por conta.</small>
+
+          <section class="portal-page" data-portal-page="mesas">
+            <div class="portal-grid">
+              <section class="portal-card">
+                <h2>Criar mesa</h2>
+                <label>Nome da mesa <input id="newCampaignName" type="text" placeholder="Ex.: A Cripta do Eclipse" /></label>
+                <label>Sistema / Regra <select id="newCampaignSystem"></select></label>
+                <button id="createCampaignButton" class="primary" type="button">Criar mesa</button>
+              </section>
+              <section class="portal-card">
+                <h2>Entrar com convite</h2>
+                <label>Codigo do convite <input id="inviteCode" type="text" placeholder="CAMP-0000" /></label>
+                <button id="joinCampaignButton" type="button">Entrar</button>
+              </section>
+              <section class="portal-card">
+                <h2>Acesso rapido</h2>
+                <button id="portalRefreshCampaignButton" type="button">Atualizar campanha</button>
+                <button id="openMasterPanel" class="primary" type="button">Pagina do mestre</button>
+                <button id="openPlayerPanel" type="button">Pagina do jogador</button>
+              </section>
+            </div>
+            <section class="portal-list-panel">
+              <h2>Campanhas</h2>
+              <div id="portalCampaigns" class="archive-card-list"></div>
+            </section>
           </section>
-          <section class="portal-card">
-            <h2>Entrar com convite</h2>
-            <label>Codigo do mestre <input id="inviteCode" type="text" placeholder="CAMP-0000" /></label>
-            <button id="joinCampaignButton" type="button">Levar ficha ativa</button>
+
+          <section class="portal-page" data-portal-page="fichas">
+            <div class="portal-grid portal-grid-slim">
+              <section class="portal-card">
+                <h2>Criar ficha</h2>
+                <label>Nome do personagem <input id="newSheetName" type="text" placeholder="Ex.: Lysandra, a Guardia" /></label>
+                <label>Sistema / Regra <select id="newSheetSystem"></select></label>
+                <button id="createSheetButton" class="primary" type="button">Criar e abrir ficha</button>
+                <small id="sheetLimitInfo">Limite: 5 fichas por conta.</small>
+              </section>
+              <section class="portal-card portal-tip-card">
+                <h2>Fichas por sistema</h2>
+                <p>Uma ficha D&D abre em campanha D&D. Uma ficha Arquivo abre em campanha Arquivo. Assim cada regra fica no seu lugar.</p>
+              </section>
+            </div>
+            <section class="portal-list-panel">
+              <h2>Minhas fichas</h2>
+              <div id="portalSheets" class="archive-card-list"></div>
+            </section>
           </section>
-          <section class="portal-card">
-            <h2>Acesso rapido</h2>
-            <button id="portalRefreshCampaignButton" type="button">Atualizar campanha</button>
-            <button id="openMasterPanel" class="primary" type="button">Pagina do mestre</button>
-            <button id="openPlayerPanel" type="button">Pagina do jogador</button>
+
+          <section class="portal-page" data-portal-page="sistemas">
+            <section class="orbe-systems-panel">
+              <div class="orbe-section-title">
+                <h2>Escolha o sistema da sua mesa</h2>
+                <p>Cada mesa pode usar um sistema diferente. Explore, combine e crie experiencias unicas.</p>
+              </div>
+              <div id="systemCards" class="orbe-system-cards"></div>
+            </section>
           </section>
-        </div>
-        <div class="portal-columns">
-          <section>
-            <h2>Campanhas</h2>
-            <div id="portalCampaigns" class="archive-card-list"></div>
-          </section>
-          <section>
-            <h2>Minhas fichas</h2>
-            <div id="portalSheets" class="archive-card-list"></div>
+
+          <section class="portal-page" data-portal-page="biblioteca">
+            <section class="portal-about note-paper">
+              <div>
+                <h2>O Arquivo Sombrio</h2>
+                <p>Ha historias que jamais chegaram aos jornais. Casos encerrados sem respostas. Desaparecimentos inexplicaveis. Rituais esquecidos. Lugares onde a realidade parece se romper.</p>
+                <p>Durante decadas, relatos desse tipo foram ocultados, arquivados ou simplesmente apagados da memoria coletiva. Entretanto, alguem reuniu essas informacoes em um unico lugar.</p>
+                <p>Esse lugar e conhecido apenas como <strong>O Arquivo Sombrio</strong>.</p>
+                <p>Cada documento presente neste servidor representa um Arquivo: um caso independente contendo pessoas, evidencias, entidades, locais e acontecimentos que desafiam qualquer explicacao racional.</p>
+                <blockquote>A pergunta nao e se existe algo escondido. A pergunta e: ate onde voce esta disposto a ir para descobrir a verdade?</blockquote>
+              </div>
+              <div>
+                <h3>Estrutura do servidor</h3>
+                <ul>
+                  <li>Cada investigacao e registrada como um Arquivo.</li>
+                  <li>Cada Arquivo corresponde a uma Oneshot independente.</li>
+                  <li>Evidencias, relatos, personagens e documentos permanecem armazenados para futuras consultas.</li>
+                  <li>Alguns Arquivos podem estar conectados entre si. Outros jamais deveriam ser abertos.</li>
+                </ul>
+                <p><strong>Criador do universo e idealizador do projeto:</strong><br />Adenilson Lanna D. Hurley</p>
+              </div>
+            </section>
           </section>
         </div>
       </div>
@@ -350,6 +438,43 @@
                 <li>Luz fraca nas tochas.</li>
                 <li>Possivel passagem secreta na parede norte.</li>
               </ul>
+            </section>
+
+            <section class="paper-panel voice-panel">
+              <div class="voice-head">
+                <h2>Voz da mesa</h2>
+                <div class="voice-state">
+                  <span id="voiceMicLamp" class="voice-mic-lamp off" aria-hidden="true"></span>
+                  <span id="voiceStatus">desconectado</span>
+                </div>
+              </div>
+              <div class="voice-actions">
+                <button id="voiceJoin" type="button">Entrar na voz</button>
+                <button id="voiceMute" type="button" disabled>Mute</button>
+                <button id="voiceDeafen" type="button" disabled>Silenciar mesa</button>
+              </div>
+              <div class="voice-actions small">
+                <button id="voiceAttention" type="button" disabled>Atencao</button>
+                <button id="voiceRequestTalk" type="button" disabled>Pedir fala</button>
+                <button id="voiceMonitor" type="button" disabled>Testar micro</button>
+              </div>
+              <div id="voiceParticipants" class="voice-participants">Ninguem conectado.</div>
+              <div id="voiceRemoteAudio" class="voice-remote-audio" aria-hidden="true"></div>
+            </section>
+
+            <section class="paper-panel soundtrack-panel">
+              <h2>Trilha sonora</h2>
+              <form id="soundtrackForm" class="soundtrack-form">
+                <input id="soundtrackUrl" type="url" placeholder="Link do YouTube, Spotify ou audio direto" />
+                <button type="submit">Adicionar</button>
+              </form>
+              <div class="soundtrack-controls">
+                <label for="soundtrackVolume">Volume da mesa</label>
+                <input id="soundtrackVolume" type="range" min="0" max="100" value="70" />
+                <span id="soundtrackVolumeValue">70%</span>
+              </div>
+              <div id="soundtrackPlayer" class="soundtrack-player">Nenhuma trilha selecionada.</div>
+              <div id="soundtrackList" class="soundtrack-list"></div>
             </section>
 
             <section class="paper-panel map-chat-panel">

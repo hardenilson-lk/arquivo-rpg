@@ -31,23 +31,43 @@
     document.body.classList.toggle("master-view", mode === "master");
     document.body.classList.toggle("player-view", mode !== "master");
 
-    const access = document.querySelector("#accessLevel");
-    if (access) access.textContent = mode === "sheet" ? "ARQUIVO PESSOAL" : `NIVEL DE ACESSO: ${mode === "master" ? "RESTRITO" : "PERMITIDO"}`;
-
     const campaign = currentCampaignFrom(state);
     const session = currentSessionFrom(state, campaign);
+    const isDnd = campaignSystemId(campaign) === "dnd5e";
+    document.body.classList.toggle("theme-dnd5e", isDnd);
+    document.body.classList.toggle("theme-dnd", isDnd);
+    document.body.classList.toggle("campaign-dnd", isDnd);
+
+    const brandMark = document.querySelector(".archive-brand .brand-mark");
+    if (brandMark) brandMark.textContent = isDnd ? "D&D" : "ARQ";
+    const brandTitle = document.querySelector(".archive-brand h1");
+    if (brandTitle) brandTitle.textContent = isDnd ? "D&D 5e" : "arquivos";
+
+    const access = document.querySelector("#accessLevel");
+    if (access) {
+      access.textContent = isDnd
+        ? (mode === "sheet" ? "FICHA DO AVENTUREIRO" : `ACESSO: ${mode === "master" ? "MESTRE" : "AVENTUREIRO"}`)
+        : (mode === "sheet" ? "ARQUIVO PESSOAL" : `NIVEL DE ACESSO: ${mode === "master" ? "RESTRITO" : "PERMITIDO"}`);
+    }
+
     const campaignLabel = document.querySelector("#campaignLabel");
-    if (campaignLabel) campaignLabel.textContent = mode === "sheet" ? `Ficha: ${sheet.name || "Sem nome"}` : `Campanha: ${campaign?.nome || state.campaignName || "Sem campanha"}`;
+    if (campaignLabel) campaignLabel.textContent = mode === "sheet" ? `Ficha: ${sheet.name || "Sem nome"}` : `${isDnd ? "Mesa" : "Campanha"}: ${campaign?.nome || state.campaignName || "Sem campanha"}`;
     const currentArchive = document.querySelector("#currentArchiveLabel");
-    if (currentArchive) currentArchive.textContent = mode === "sheet" ? "Arquivo pessoal do jogador" : `${mode === "master" ? "Arquivo atual" : "Arquivo liberado"}: ${session?.codigoArquivo || "sem arquivo"}`;
+    if (currentArchive) currentArchive.textContent = mode === "sheet"
+      ? (isDnd ? "Ficha do aventureiro" : "Arquivo pessoal do jogador")
+      : `${isDnd ? "Jornada atual" : mode === "master" ? "Arquivo atual" : "Arquivo liberado"}: ${session?.codigoArquivo || "sem arquivo"}`;
     const sessionLabel = document.querySelector("#sessionLabel");
     if (sessionLabel) sessionLabel.textContent = mode === "sheet" ? "Menus: ficha, inventario e anotacoes" : `Sessao: ${session?.titulo || state.map?.name || "Sem sessao"}`;
 
     const toggle = document.querySelector("#modeBadge");
-    if (toggle) toggle.textContent = mode === "sheet" ? "ficha pessoal" : mode === "master" ? "mestre da sala" : "jogador";
+    if (toggle) toggle.textContent = isDnd
+      ? (mode === "sheet" ? "ficha do heroi" : mode === "master" ? "mestre da mesa" : "aventureiro")
+      : (mode === "sheet" ? "ficha pessoal" : mode === "master" ? "mestre da sala" : "jogador");
 
     const mapLabel = document.querySelector("#mapTitleLabel");
-    if (mapLabel) mapLabel.textContent = `${session?.codigoArquivo || "sem arquivo"} - ${session?.titulo || state.map?.name || "Mapa sem nome"}`;
+    if (mapLabel) mapLabel.textContent = isDnd
+      ? `${state.map?.name || "Mapa de combate"} - ${session?.titulo || "Jornada"}`
+      : `${session?.codigoArquivo || "sem arquivo"} - ${session?.titulo || state.map?.name || "Mapa sem nome"}`;
 
     const location = document.querySelector("#archiveLocation");
     if (location) location.textContent = state.map?.name || "Camara central";
@@ -55,7 +75,7 @@
     if (objective) {
       objective.textContent = mode === "sheet"
         ? sheet.objective || "Arquivo pessoal do agente."
-        : session?.mission || session?.resumo || "Objetivo ainda nao registrado pelo mestre.";
+        : session?.mission || session?.resumo || (isDnd ? "Explore a area e avance a jornada." : "Objetivo ainda nao registrado pelo mestre.");
     }
 
     renderCRT(state, sheet, mode);
@@ -75,13 +95,32 @@
     return state.sheets?.find((sheet) => sheet.id === state.activeSheetId) || state.sheets?.[0] || {};
   }
 
+  function campaignSystemId(campaign) {
+    const value = campaign?.payload?.sistema_regra || campaign?.payload?.sistemaRegra || campaign?.sistemaRegra || campaign?.sistema_regra || campaign?.system || "arquivo";
+    const clean = String(value || "arquivo").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (clean === "dnd" || clean === "dnd5" || clean === "dnd5e") return "dnd5e";
+    if (clean === "custom" || clean === "sistemaproprio" || clean === "personalizado") return "personalizado";
+    return "arquivo";
+  }
+
   function renderCRT(state, sheet, mode) {
     const crt = document.querySelector("#crtStatus");
     if (!crt) return;
     const lastRoll = state.rolls?.[0];
     const campaign = currentCampaignFrom(state);
     const session = currentSessionFrom(state, campaign);
-    const statusLines = [
+    const isDnd = campaignSystemId(campaign) === "dnd5e";
+    const statusLines = isDnd ? [
+      "> STATUS DA CAMPANHA",
+      "> SISTEMA: D&D 5E",
+      `> USUARIO: ${mode === "master" ? "MESTRE" : "AVENTUREIRO"}`,
+      `> MESA: ${safeLine(campaign?.nome || state.campaignName || "NOVA CAMPANHA")}`,
+      `> JORNADA: ${safeLine(session?.titulo || state.map?.name || "SEM SESSAO")}`,
+      `> TOKENS EM CAMPO: ${state.tokens?.length || 0}`,
+      `> HEROI ATIVO: ${safeLine(sheet.name || "NAO DEFINIDO")}`,
+      "> CONEXAO: SUPABASE - ONLINE",
+      lastRoll ? `> ULTIMA ROLAGEM: ${lastRoll.total} EM ${safeLine(lastRoll.formula)}` : "> TUDO PRONTO PARA ROLAR",
+    ] : [
       "> SISTEMA ARQUIVOS v1.07",
       `> USUARIO: ${mode === "master" ? "MESTRE" : "JOGADOR"}`,
       `> CAMPANHA: ${safeLine(campaign?.nome || state.campaignName || "MESA DE COMBATE")}`,
@@ -91,7 +130,7 @@
       `> AGENTE: ${safeLine(sheet.name || "NAO IDENTIFICADO")}`,
       lastRoll ? `> ULTIMA ROLAGEM: ${lastRoll.total} EM ${safeLine(lastRoll.formula)}` : "> AGUARDANDO ROLAGEM...",
     ];
-    crt.innerHTML = `${statusLines.map(escapeHtml).join("\n")}\n&gt; AGUARDANDO COMANDO<span class="crt-dots" aria-hidden="true"></span>`;
+    crt.innerHTML = `${statusLines.map(escapeHtml).join("\n")}\n&gt; ${isDnd ? "AGUARDANDO AVENTURA" : "AGUARDANDO COMANDO"}<span class="crt-dots" aria-hidden="true"></span>`;
   }
 
   function safeLine(value) {

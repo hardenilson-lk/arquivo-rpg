@@ -1,0 +1,2178 @@
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) {
+  --dnd-bg: #080604;
+  --dnd-wood: #1a1009;
+  --dnd-wood-2: #2a190d;
+  --dnd-wood-3: #3b2514;
+  --dnd-panel: #120d09;
+  --dnd-panel-soft: #20150d;
+  --dnd-gold: #caa45c;
+  --dnd-gold-bright: #f1d38a;
+  --dnd-red: #7b1512;
+  --dnd-red-bright: #b7372e;
+  --dnd-parchment: #cbb287;
+  --dnd-parchment-2: #e0c99a;
+  --dnd-ink: #27170c;
+  --dnd-muted: #9c8053;
+  --dnd-border: #4d321b;
+  color: var(--dnd-parchment);
+  background:
+    radial-gradient(circle at 74% 18%, rgba(108, 24, 18, .16), transparent 34%),
+    radial-gradient(circle at 18% 78%, rgba(202, 164, 92, .09), transparent 30%),
+    linear-gradient(90deg, rgba(0,0,0,.68), rgba(0,0,0,.22) 46%, rgba(0,0,0,.72)),
+    repeating-linear-gradient(90deg, #100904 0 9px, #0b0704 9px 18px);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .app-shell {
+  background:
+    linear-gradient(180deg, rgba(6,4,3,.92), rgba(13,8,5,.98)),
+    repeating-linear-gradient(0deg, rgba(255,255,255,.02) 0 1px, transparent 1px 6px);
+  color: var(--dnd-parchment);
+  font-family: "Marcellus", Georgia, serif;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .archive-workspace,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .workspace {
+  background:
+    radial-gradient(circle at 50% 12%, rgba(142, 38, 24, .08), transparent 36%),
+    linear-gradient(90deg, rgba(0,0,0,.28), transparent 24%, rgba(0,0,0,.35));
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .archive-topbar {
+  min-height: 92px;
+  border-bottom: 1px solid rgba(202,164,92,.34);
+  background:
+    linear-gradient(90deg, rgba(28,16,9,.98), rgba(11,7,5,.92)),
+    repeating-linear-gradient(0deg, rgba(255,255,255,.025) 0 1px, transparent 1px 8px);
+  box-shadow: inset 0 -10px 20px rgba(0,0,0,.34);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .archive-topbar .eyebrow {
+  color: var(--dnd-gold);
+  font-family: "Cinzel", Georgia, serif;
+  letter-spacing: .06em;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) #viewTitle {
+  color: #ead8b4;
+  font-family: "Cinzel", Georgia, serif;
+  font-size: clamp(1.7rem, 3.1vw, 3.2rem);
+  text-shadow: 0 2px 0 #000, 0 0 24px rgba(202,164,92,.22);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .sidebar-toggle,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .mini-tab,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) button {
+  border-color: rgba(202,164,92,.36);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .folder-sidebar {
+  color: var(--dnd-parchment);
+  border-right: 2px solid rgba(202,164,92,.28);
+  background:
+    linear-gradient(90deg, rgba(8,5,3,.7), transparent 45%),
+    repeating-linear-gradient(0deg, rgba(255,255,255,.018) 0 2px, transparent 2px 8px),
+    linear-gradient(180deg, #24160c, #130b06 70%, #080504);
+  box-shadow: inset -10px 0 22px rgba(0,0,0,.55), 10px 0 34px rgba(0,0,0,.35);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .folder-sidebar::before,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .note-paper::before {
+  opacity: .16;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .archive-brand {
+  border-bottom: 1px solid rgba(202,164,92,.24);
+  padding-bottom: 16px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .archive-brand .brand-mark {
+  width: 64px;
+  height: 64px;
+  display: grid;
+  place-items: center;
+  color: #f0d7a0;
+  border: 2px solid rgba(202,164,92,.55);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, rgba(128,20,18,.75), rgba(19,10,5,.92) 58%, #080503),
+    conic-gradient(from 45deg, transparent, rgba(202,164,92,.45), transparent 30%);
+  box-shadow: 0 0 22px rgba(123,21,18,.42), inset 0 0 18px rgba(0,0,0,.6);
+  transform: none;
+  font-family: "Cinzel", Georgia, serif;
+  font-size: 1rem;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .typewriter-title {
+  color: #ead8b4;
+  font-family: "Cinzel", Georgia, serif;
+  font-size: clamp(1.8rem, 3vw, 2.8rem);
+  text-transform: uppercase;
+  letter-spacing: .02em;
+  text-shadow: 0 2px 0 #000, 0 0 14px rgba(202,164,92,.24);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .archive-context,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .access-level {
+  color: #b99a63;
+  font-family: "Marcellus", Georgia, serif;
+  text-transform: none;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .danger-stamp,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .mode-switch {
+  color: #ffdca2;
+  border-color: rgba(183,55,46,.72);
+  background: linear-gradient(135deg, rgba(123,21,18,.78), rgba(38,19,11,.9));
+  text-shadow: 0 1px 0 #000;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .sync-status {
+  border-color: rgba(202,164,92,.24);
+  background: rgba(7,5,3,.48);
+  color: #d8bc7f;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .menu-button {
+  color: #dfc594;
+  border: 1px solid rgba(202,164,92,.24);
+  background:
+    linear-gradient(90deg, rgba(86,48,22,.85), rgba(20,11,6,.96)),
+    repeating-linear-gradient(0deg, rgba(255,255,255,.025) 0 1px, transparent 1px 7px);
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,.55), 0 4px 10px rgba(0,0,0,.22);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .menu-button:hover,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .menu-button.active {
+  color: #ffe5ab;
+  background:
+    linear-gradient(90deg, rgba(123,21,18,.96), rgba(63,31,15,.95)),
+    repeating-linear-gradient(0deg, rgba(255,255,255,.028) 0 1px, transparent 1px 7px);
+  border-color: rgba(241,211,138,.58);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .objective-card,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .note-paper,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .paper-panel,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dossier-placeholder {
+  color: var(--dnd-ink);
+  border: 1px solid rgba(86,54,25,.72);
+  background:
+    linear-gradient(90deg, rgba(255,255,255,.12), transparent 18%, rgba(0,0,0,.06)),
+    repeating-linear-gradient(0deg, rgba(80,48,24,.08) 0 1px, transparent 1px 7px),
+    linear-gradient(180deg, #e0c99a, #b99660);
+  box-shadow: inset 0 0 0 1px rgba(255,242,197,.16), 0 10px 26px rgba(0,0,0,.34);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .objective-card h2,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .note-paper h2,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .paper-panel h2,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dossier-placeholder h2 {
+  font-family: "Cinzel", Georgia, serif;
+  color: #1a0e07;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .map-frame {
+  border: 10px solid transparent;
+  border-image: linear-gradient(135deg, #17100a, #63411f, #0b0704, #5b381b) 1;
+  background:
+    radial-gradient(circle at 50% 45%, rgba(97,67,32,.42), transparent 36%),
+    linear-gradient(135deg, rgba(18,10,5,.98), rgba(39,24,13,.92));
+  box-shadow:
+    inset 0 0 0 2px rgba(202,164,92,.22),
+    inset 0 0 55px rgba(0,0,0,.72),
+    0 18px 38px rgba(0,0,0,.6);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .map-frame::before {
+  content: "";
+  position: absolute;
+  inset: 9px;
+  pointer-events: none;
+  border: 1px solid rgba(202,164,92,.2);
+  box-shadow: inset 0 0 24px rgba(0,0,0,.58);
+  z-index: 1;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .map-label {
+  color: #ead8b4;
+  background:
+    linear-gradient(90deg, #2f1c0e, #130b06),
+    repeating-linear-gradient(0deg, rgba(255,255,255,.025) 0 1px, transparent 1px 7px);
+  border: 1px solid rgba(202,164,92,.34);
+  box-shadow: 0 4px 12px rgba(0,0,0,.45);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .map-label span {
+  color: #e76450;
+  font-family: "Cinzel", Georgia, serif;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .battlefield-wrap {
+  border: 5px solid #0b0704;
+  background: radial-gradient(circle at 50% 50%, #24301d, #11140e 64%, #070605);
+  box-shadow: inset 0 0 34px rgba(0,0,0,.8);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .battlefield {
+  background:
+    radial-gradient(circle at 28% 18%, rgba(87,112,49,.35), transparent 28%),
+    radial-gradient(circle at 76% 78%, rgba(33,74,47,.28), transparent 30%),
+    linear-gradient(135deg, rgba(24,45,20,.88), rgba(46,42,20,.72)),
+    repeating-linear-gradient(45deg, rgba(255,255,255,.025) 0 2px, transparent 2px 10px);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .cell {
+  border-color: rgba(202,164,92,.24);
+  background-color: rgba(0,0,0,.03);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .cell.lit {
+  background-color: rgba(255,220,138,.08);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .cell.dark {
+  background-color: rgba(0,0,0,.36);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .map-quick-tools {
+  gap: 8px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .map-quick-tools summary,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .map-tools .mini-tab {
+  color: #e8ca8d;
+  border-color: rgba(202,164,92,.36);
+  background:
+    linear-gradient(180deg, #332012, #140b06),
+    repeating-linear-gradient(0deg, rgba(255,255,255,.03) 0 1px, transparent 1px 7px);
+  font-family: "Cinzel", Georgia, serif;
+  text-shadow: 0 1px 0 #000;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .map-quick-tools details[open] {
+  color: var(--dnd-ink);
+  background:
+    linear-gradient(180deg, rgba(224,201,154,.97), rgba(184,145,86,.97));
+  border-color: rgba(99,61,28,.86);
+  box-shadow: 0 10px 22px rgba(0,0,0,.45);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .map-quick-tools details[open] summary {
+  color: #ffe2a5;
+  background: linear-gradient(180deg, #7b1512, #351309);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .map-tools {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .token {
+  border-color: rgba(226,191,112,.96);
+  background-clip: padding-box;
+  box-shadow:
+    0 0 0 2px rgba(30,17,8,.96),
+    0 0 0 4px rgba(202,164,92,.38),
+    0 8px 14px rgba(0,0,0,.56);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .token.npc-token {
+  border-color: rgba(184,55,46,.95);
+  box-shadow:
+    0 0 0 2px rgba(30,17,8,.96),
+    0 0 0 4px rgba(123,21,18,.55),
+    0 8px 14px rgba(0,0,0,.56);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .token-name-tag {
+  color: #ffe7a9;
+  border-color: rgba(202,164,92,.72);
+  background: linear-gradient(180deg, #2d1a0d, #080503);
+  font-family: "Marcellus", Georgia, serif;
+  text-shadow: 0 1px 0 #000;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .token-bar.hp { --token-color: #b7372e; }
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .token-bar.pe { --token-color: #2c69b8; }
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .token-bar.san { --token-color: #caa45c; }
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .crt-monitor {
+  border: 8px solid transparent;
+  border-image: linear-gradient(135deg, #4a2c14, #0a0604, #76512a) 1;
+  border-radius: 0;
+  padding: 12px;
+  background:
+    radial-gradient(circle at 50% 8%, rgba(183,55,46,.32), transparent 24%),
+    linear-gradient(180deg, #1b1009, #060403);
+  box-shadow: inset 0 0 0 1px rgba(202,164,92,.16), 0 16px 28px rgba(0,0,0,.48);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .crt-screen {
+  min-height: 238px;
+  max-height: none;
+  overflow: hidden;
+  color: #dec28b;
+  border: 1px solid rgba(202,164,92,.28);
+  background:
+    radial-gradient(circle at 50% 23%, rgba(183,55,46,.42), transparent 22%),
+    radial-gradient(circle at 50% 21%, rgba(255,118,74,.14), transparent 34%),
+    linear-gradient(180deg, rgba(14,9,6,.95), rgba(5,3,2,.98));
+  box-shadow: inset 0 0 36px rgba(0,0,0,.82);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .crt-screen::before {
+  content: "Status da Campanha";
+  display: block;
+  margin: 0 0 12px;
+  color: #f1d38a;
+  font-family: "Cinzel", Georgia, serif;
+  font-size: 1.1rem;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .crt-screen::after {
+  content: "";
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .crt-screen pre {
+  color: #d7bb83;
+  font-family: "Marcellus", Georgia, serif;
+  font-size: .78rem;
+  line-height: 1.55;
+  text-shadow: none;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .crt-roll-config {
+  border-color: rgba(202,164,92,.3);
+  background: rgba(14,8,4,.84);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .roll-result {
+  color: #f5ddaa;
+  border-color: rgba(202,164,92,.42);
+  background:
+    linear-gradient(180deg, rgba(123,21,18,.65), rgba(32,14,7,.96));
+  text-shadow: 0 2px 0 #000;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .right-stack {
+  gap: 14px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .clues-panel,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .map-chat-panel,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .voice-panel,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .soundtrack-panel,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .character-board {
+  border: 1px solid rgba(86,54,25,.74);
+  background:
+    repeating-linear-gradient(0deg, rgba(80,48,24,.08) 0 1px, transparent 1px 7px),
+    linear-gradient(180deg, #dcc493, #b58e56);
+  color: var(--dnd-ink);
+  box-shadow: inset 0 0 0 1px rgba(255,242,197,.15), 0 10px 22px rgba(0,0,0,.28);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .master-shield {
+  border: 6px solid transparent;
+  border-image: linear-gradient(135deg, #5b381b, #100905, #76512a) 1;
+  color: var(--dnd-ink);
+  background:
+    repeating-linear-gradient(0deg, rgba(80,48,24,.08) 0 1px, transparent 1px 7px),
+    linear-gradient(180deg, #dec797, #b7925d);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .master-shield h2,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .master-shield h3 {
+  color: #1a0e07;
+  font-family: "Cinzel", Georgia, serif;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .master-shield-list {
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .shield-agent {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(86,54,25,.6);
+  background:
+    linear-gradient(180deg, rgba(255,242,197,.18), transparent 34%),
+    linear-gradient(180deg, #d7bf8f, #b28a51);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.08), 0 8px 16px rgba(0,0,0,.18);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .shield-agent::before {
+  content: "d20";
+  position: absolute;
+  right: 10px;
+  top: 8px;
+  color: rgba(86,54,25,.28);
+  font-family: "Cinzel", Georgia, serif;
+  font-size: 1.15rem;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .shield-agent b {
+  color: #291509;
+  font-family: "Cinzel", Georgia, serif;
+  font-size: 1rem;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .shield-agent span,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .shield-agent small {
+  color: #3a2412;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .shield-bars i {
+  background: linear-gradient(90deg, var(--bar-color) 0 var(--bar), rgba(35,20,10,.25) var(--bar) 100%);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) input,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) select,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) textarea {
+  border-color: rgba(91,56,27,.64);
+  background: rgba(255,239,197,.72);
+  color: #1a0e07;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .damage-inline button,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .shield-shortcuts button,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .chat-form button,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .soundtrack-form button,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .voice-actions button {
+  color: #ffe3ad;
+  border-color: rgba(202,164,92,.32);
+  background: linear-gradient(180deg, #4a2914, #160b05);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .history-panel {
+  border: 5px solid transparent;
+  border-image: linear-gradient(135deg, #4a2c14, #0a0604, #76512a) 1;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .file-view .dossier-sheet,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-sheet {
+  width: min(1240px, calc(100vw - 360px));
+  border: 8px solid transparent;
+  border-image: linear-gradient(135deg, #5b381b, #100905, #76512a) 1;
+  background:
+    radial-gradient(circle at 72% 8%, rgba(123,21,18,.18), transparent 26%),
+    repeating-linear-gradient(0deg, rgba(80,48,24,.08) 0 1px, transparent 1px 7px),
+    linear-gradient(180deg, #23150b, #0c0805);
+  filter: saturate(1.02) contrast(1.02);
+  box-shadow: inset 0 0 0 1px rgba(202,164,92,.16), 0 24px 70px rgba(0,0,0,.5);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-sheet-head {
+  border-bottom-color: rgba(202,164,92,.34);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-sheet h2,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-sheet h3 {
+  color: #f4d998;
+  font-family: "Cinzel", Georgia, serif;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-system-pill {
+  border-color: rgba(241,211,138,.52);
+  background: linear-gradient(180deg, rgba(123,21,18,.74), rgba(38,19,11,.92));
+  color: #ffe6aa;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-card,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-notes-grid label {
+  border-color: rgba(202,164,92,.26);
+  background:
+    linear-gradient(180deg, rgba(255,242,197,.08), rgba(0,0,0,.08)),
+    rgba(30,18,10,.86);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.025);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-sheet label,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-stat {
+  color: #ead2a0;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-sheet input,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-sheet select,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-sheet textarea {
+  border-color: rgba(202,164,92,.32);
+  background: rgba(7,5,3,.72);
+  color: #fbefd1;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-stat {
+  border: 1px solid rgba(202,164,92,.24);
+  background: rgba(9,6,4,.48);
+  padding: 10px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-stat input {
+  color: #ffe8ad;
+  background: rgba(0,0,0,.42);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-derived-grid b {
+  border-color: rgba(202,164,92,.34);
+  background: linear-gradient(180deg, rgba(123,21,18,.58), rgba(12,7,4,.9));
+  color: #ffe6aa;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-skills-table th {
+  color: #f1d38a;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-skills-table td {
+  border-bottom-color: rgba(202,164,92,.18);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-skills-table button {
+  color: #f6dfaf;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-skills-table button:hover {
+  color: #fff2c6;
+  text-shadow: 0 0 10px rgba(202,164,92,.25);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-slot-grid > span,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-slot-grid label span {
+  color: #f1d38a;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-sheet-foot {
+  border-top-color: rgba(202,164,92,.28);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-hero-sheet {
+  position: relative;
+  width: min(1260px, calc(100vw - 340px));
+  min-height: 1500px;
+  overflow: hidden;
+  padding: 34px 38px 28px;
+  border: 10px solid transparent;
+  border-image: linear-gradient(135deg, #b88a42, #2a1608, #7b5224, #e5c778) 1;
+  background:
+    linear-gradient(rgba(255,244,207,.86), rgba(235,205,141,.82)),
+    url("./assets/dnd-sheet-bg.png") center top / 100% auto no-repeat,
+    #ecd39a;
+  color: #251304;
+  box-shadow: inset 0 0 0 2px rgba(71,33,9,.42), inset 0 0 55px rgba(80,36,9,.2), 0 26px 80px rgba(0,0,0,.62);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-hero-sheet::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 70% 33%, rgba(117,28,152,.18), transparent 22%),
+    radial-gradient(circle at 50% 5%, rgba(255,241,180,.28), transparent 16%),
+    linear-gradient(90deg, rgba(55,22,7,.16), transparent 22%, transparent 78%, rgba(55,22,7,.15));
+  mix-blend-mode: multiply;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-hero-sheet > * {
+  position: relative;
+  z-index: 1;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-hero-top {
+  display: grid;
+  grid-template-columns: minmax(300px, 1.05fr) minmax(460px, 1fr);
+  gap: 22px;
+  align-items: start;
+  margin-bottom: 22px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-name-banner {
+  min-height: 112px;
+  padding: 18px 24px;
+  border: 2px solid rgba(108,47,16,.58);
+  background:
+    linear-gradient(180deg, rgba(107,15,18,.94), rgba(76,18,12,.9)),
+    radial-gradient(circle at 18% 50%, rgba(255,230,153,.28), transparent 32%);
+  box-shadow: inset 0 0 0 1px rgba(255,229,157,.22), 0 10px 22px rgba(67,32,11,.25);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-name-banner span,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-top-fields label,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-save-chip span,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-vital-scroll label {
+  color: #3b210b;
+  font-family: "Cinzel", Georgia, serif;
+  font-weight: 800;
+  letter-spacing: .02em;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-name-banner input {
+  width: 100%;
+  margin-top: 8px;
+  border: 0;
+  background: transparent;
+  color: #fff0bb;
+  font-family: "Cinzel", Georgia, serif;
+  font-size: clamp(2.1rem, 5vw, 4.4rem);
+  font-weight: 900;
+  text-shadow: 0 2px 0 #1a0904, 0 0 18px rgba(255,199,88,.35);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-top-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(120px, 1fr));
+  gap: 8px;
+  padding: 12px;
+  border: 2px solid rgba(113,65,24,.44);
+  background: rgba(255,239,190,.68);
+  box-shadow: inset 0 0 18px rgba(86,47,15,.15);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-top-fields label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  font-size: .72rem;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-top-fields input,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-top-fields select,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-vital-scroll input,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-hero-combat input {
+  border: 1px solid rgba(97,51,16,.42);
+  background: rgba(255,246,218,.78);
+  color: #261304;
+  font-family: "Georgia", serif;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-hero-body {
+  display: grid;
+  grid-template-columns: minmax(360px, .72fr) minmax(540px, 1fr);
+  gap: 30px;
+  align-items: start;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-left-column {
+  display: grid;
+  gap: 14px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-card,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-notes-grid label {
+  border: 2px solid rgba(87,47,18,.42);
+  background:
+    linear-gradient(180deg, rgba(255,246,218,.7), rgba(225,193,128,.56)),
+    rgba(245,220,164,.78);
+  color: #281608;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.24), 0 8px 18px rgba(70,34,9,.16);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-card h3,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-notes-grid b {
+  display: inline-block;
+  margin-bottom: 10px;
+  padding: 5px 14px;
+  border: 1px solid rgba(230,192,105,.26);
+  background: linear-gradient(180deg, #31170b, #130804);
+  color: #f7dc9a;
+  font-family: "Cinzel", Georgia, serif;
+  text-shadow: 0 1px 0 #000;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-save-strip {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(46px, 1fr));
+  gap: 6px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-save-chip {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  min-height: 68px;
+  padding: 7px 4px;
+  border: 1px solid rgba(105,58,20,.44);
+  background: radial-gradient(circle at 50% 20%, #fff6d7, #d5a95d);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-save-chip input {
+  width: 13px;
+  height: 13px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-save-chip b {
+  font-size: 1.12rem;
+  color: #2a1205;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-prof-badge {
+  display: block;
+  margin-top: 10px;
+  text-align: center;
+  color: #3a1a08;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-skills-card {
+  max-height: 610px;
+  overflow: auto;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-skills-table {
+  color: #251304;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-skills-table th {
+  color: #6d1e16;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-skills-table td {
+  border-bottom-color: rgba(70,34,9,.2);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-skills-table button {
+  color: #2b1506;
+  font-weight: 800;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-attack-card textarea {
+  min-height: 180px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-character-stage {
+  position: relative;
+  min-height: 960px;
+  padding: 16px 10px 24px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-hero-portrait {
+  position: relative;
+  display: block;
+  width: min(72%, 520px);
+  aspect-ratio: 1;
+  margin: 188px auto 18px;
+  border-radius: 50%;
+  border: 8px solid rgba(139,91,31,.76);
+  background: radial-gradient(circle, rgba(92,24,126,.28), rgba(255,239,193,.38));
+  box-shadow: inset 0 0 0 4px rgba(255,233,156,.4), 0 0 0 12px rgba(76,30,8,.12), 0 24px 48px rgba(57,23,8,.24);
+  overflow: hidden;
+  cursor: pointer;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-hero-portrait .profile-photo-preview {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  background-position: center;
+  background-size: cover;
+  color: #3a1d0b;
+  text-align: center;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-hero-portrait b {
+  display: block;
+  font-family: "Cinzel", Georgia, serif;
+  font-size: clamp(3rem, 6vw, 6rem);
+  color: #6d1e16;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-hero-portrait small {
+  margin-top: -42px;
+  color: #4d2a0e;
+  font-weight: 800;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-orbit {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-medallion {
+  position: absolute;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  width: 112px;
+  height: 112px;
+  border-radius: 50%;
+  border: 4px solid rgba(154,101,35,.72);
+  background: radial-gradient(circle at 50% 35%, #fff4cf, #d1a257 70%, #5b2b0c);
+  box-shadow: inset 0 0 0 2px rgba(255,239,178,.42), 0 8px 18px rgba(60,22,6,.28);
+  color: #2a1405;
+  pointer-events: auto;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-medallion span {
+  font-family: "Cinzel", Georgia, serif;
+  font-size: .76rem;
+  font-weight: 900;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-medallion input {
+  width: 64px;
+  border: 0;
+  background: transparent;
+  color: #2a1405;
+  font-family: "Cinzel", Georgia, serif;
+  font-size: 2.2rem;
+  font-weight: 900;
+  text-align: center;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-medallion em {
+  font-style: normal;
+  font-weight: 900;
+  color: #6d1e16;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-forca { top: 112px; right: 26px; }
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-destreza { top: 44px; right: 190px; }
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-constituicao { top: 84px; left: 112px; }
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-inteligencia { top: 218px; left: 36px; }
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-sabedoria { top: 382px; left: 64px; }
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-carisma { top: 538px; left: 108px; }
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-hero-combat {
+  display: grid;
+  grid-template-columns: 1fr 1.15fr 1fr;
+  gap: 12px;
+  align-items: end;
+  margin: 12px auto;
+  max-width: 620px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-hero-combat label {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  min-height: 120px;
+  padding: 10px;
+  text-align: center;
+  color: #2a1405;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-hero-combat input {
+  width: 70px;
+  text-align: center;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-hero-combat b {
+  font-family: "Cinzel", Georgia, serif;
+  font-size: 2rem;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ribbon {
+  border: 2px solid rgba(114,68,24,.48);
+  background: linear-gradient(180deg, #f8e2a7, #c19042);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ribbon.dnd-blue {
+  box-shadow: inset 0 -18px 0 rgba(28,72,153,.55);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ribbon.dnd-red {
+  box-shadow: inset 0 -18px 0 rgba(144,25,25,.62);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-armor-badge {
+  border-radius: 0 0 30px 30px;
+  border: 3px solid rgba(116,69,24,.62);
+  background: radial-gradient(circle at 50% 20%, #fff3cd, #d0a154 70%, #5a2b0d);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-vital-scroll {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(110px, 1fr));
+  gap: 8px;
+  margin: 14px auto;
+  max-width: 650px;
+  padding: 12px;
+  border: 2px solid rgba(104,58,19,.42);
+  background: rgba(255,240,201,.62);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-vital-scroll label {
+  display: grid;
+  gap: 3px;
+  font-size: .74rem;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-death-grid {
+  max-width: 650px;
+  margin: 12px auto;
+  border: 2px solid rgba(104,58,19,.38);
+  background: rgba(239,210,149,.58);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-death-row {
+  color: #2a1405;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-hero-sheet .sheet-damage-tools {
+  max-width: 650px;
+  margin: 12px auto 0;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-hero-sheet .sheet-damage-tools button,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-sheet-foot button {
+  background: linear-gradient(180deg, #7e3b14, #2b1106);
+  color: #fff1c2;
+  border-color: rgba(193,142,59,.64);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-magic-grid,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-notes-grid {
+  margin-top: 18px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-hero-sheet textarea,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-hero-sheet select,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-hero-sheet input {
+  color: #241204;
+}
+
+/* Ficha D&D: leitura primeiro, ornamento como apoio visual. */
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-hero-sheet {
+  width: min(1180px, calc(100vw - 300px));
+  min-height: auto;
+  padding: 26px;
+  background:
+    radial-gradient(circle at 72% 28%, rgba(117,39,149,.16), transparent 26%),
+    linear-gradient(135deg, rgba(255,245,216,.96), rgba(223,188,119,.9) 52%, rgba(151,92,31,.72)),
+    #eed59d;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-hero-sheet::before {
+  background:
+    radial-gradient(circle at 68% 30%, rgba(125,34,164,.16), transparent 24%),
+    linear-gradient(90deg, rgba(61,25,8,.1), transparent 20%, transparent 80%, rgba(61,25,8,.12));
+  mix-blend-mode: multiply;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-hero-sheet::after {
+  content: "";
+  position: absolute;
+  inset: 18px;
+  z-index: 0;
+  pointer-events: none;
+  opacity: .1;
+  background: url("./assets/dnd-sheet-bg.png") center top / contain no-repeat;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-hero-top {
+  grid-template-columns: minmax(280px, .95fr) minmax(420px, 1.25fr);
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-name-banner {
+  min-height: 92px;
+  padding: 14px 18px;
+  border-radius: 10px;
+  border-color: rgba(183,126,45,.65);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-name-banner input {
+  font-size: clamp(1.8rem, 3.4vw, 3.4rem);
+  line-height: 1;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-top-fields {
+  grid-template-columns: repeat(3, minmax(110px, 1fr));
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(255,243,211,.88), rgba(224,190,121,.72));
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-hero-body {
+  grid-template-columns: minmax(360px, 430px) minmax(420px, 1fr);
+  gap: 20px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-card,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-notes-grid label {
+  border-radius: 10px;
+  background:
+    linear-gradient(180deg, rgba(255,248,224,.9), rgba(224,190,121,.7)),
+    rgba(245,220,164,.84);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-skills-card {
+  max-height: 460px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-character-stage {
+  display: grid;
+  grid-template-columns: minmax(230px, 310px) minmax(260px, 1fr);
+  grid-template-areas:
+    "portrait abilities"
+    "portrait combat"
+    "vitals vitals"
+    "death death"
+    "damage damage";
+  gap: 14px;
+  min-height: auto;
+  padding: 0;
+  align-items: start;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-orbit {
+  grid-area: abilities;
+  position: static;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(82px, 1fr));
+  gap: 10px;
+  pointer-events: auto;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-medallion,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-forca,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-destreza,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-constituicao,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-inteligencia,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-sabedoria,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-carisma {
+  position: static;
+  width: 100%;
+  height: 104px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-medallion input {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 2rem;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-hero-portrait {
+  grid-area: portrait;
+  width: 100%;
+  max-width: 310px;
+  margin: 0;
+  align-self: stretch;
+  min-height: 390px;
+  aspect-ratio: auto;
+  border-radius: 28px;
+  border-color: rgba(122,72,26,.76);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-hero-portrait .profile-photo-preview {
+  border-radius: 18px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-hero-portrait b {
+  font-size: clamp(2.3rem, 5vw, 4.5rem);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-hero-combat {
+  grid-area: combat;
+  grid-template-columns: repeat(3, minmax(86px, 1fr));
+  max-width: none;
+  margin: 0;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-hero-combat label {
+  min-height: 98px;
+  border-radius: 10px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-vital-scroll {
+  grid-area: vitals;
+  max-width: none;
+  margin: 0;
+  grid-template-columns: repeat(4, minmax(100px, 1fr));
+  border-radius: 10px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-death-grid {
+  grid-area: death;
+  max-width: none;
+  margin: 0;
+  border-radius: 10px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-hero-sheet .sheet-damage-tools {
+  grid-area: damage;
+  max-width: none;
+  margin: 0;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-save-strip {
+  grid-template-columns: repeat(3, minmax(82px, 1fr));
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-save-chip {
+  min-height: 58px;
+  border-radius: 8px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-magic-grid {
+  grid-template-columns: 1.05fr .95fr;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-notes-grid {
+  grid-template-columns: repeat(3, minmax(220px, 1fr));
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-hero-sheet textarea {
+  min-height: 104px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-sheet {
+  width: min(1120px, calc(100vw - 300px));
+  min-height: auto;
+  padding: 18px;
+  border: 2px solid #1d2630;
+  border-radius: 0;
+  border-image: none;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.98), rgba(239,244,251,.98)),
+    #f6f8fb;
+  color: #17202a;
+  font-family: Georgia, "Times New Roman", serif;
+  filter: none;
+  box-shadow: 0 22px 60px rgba(0,0,0,.45);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-sheet::before,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-sheet::after {
+  display: none;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-sheet > * {
+  position: relative;
+  z-index: 1;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-head {
+  display: grid;
+  grid-template-columns: 180px minmax(250px, .85fr) minmax(420px, 1.45fr);
+  gap: 12px;
+  align-items: stretch;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 3px solid #1d2630;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-dragon-brand {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  min-height: 82px;
+  border: 2px solid #1d2630;
+  border-radius: 32px 4px 32px 4px;
+  background: linear-gradient(180deg, #ffffff, #e8eef7);
+  text-align: center;
+  text-transform: uppercase;
+  color: #1b2630;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-dragon-brand span {
+  font-size: .68rem;
+  font-weight: 900;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-dragon-brand b {
+  font-family: "Cinzel", Georgia, serif;
+  font-size: 2rem;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-character-name,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-identity,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-box,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-box,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-top-stats > *,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-portrait {
+  border: 2px solid #1d2630;
+  border-radius: 8px;
+  background: #f8fbff;
+  color: #17202a;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-character-name {
+  display: grid;
+  gap: 5px;
+  align-content: end;
+  padding: 10px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-character-name span,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-sheet label,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-box h3,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-top-stats span {
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: .68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: #273445;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-character-name input {
+  border: 0;
+  border-bottom: 2px solid #1d2630;
+  background: transparent;
+  color: #17202a;
+  font-family: "Cinzel", Georgia, serif;
+  font-size: clamp(1.8rem, 3vw, 3rem);
+  font-weight: 900;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-identity {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(120px, 1fr));
+  gap: 8px;
+  padding: 10px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-sheet input,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-sheet select,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-sheet textarea {
+  border: 1px solid #8a97a8;
+  border-radius: 2px;
+  background: #fff;
+  color: #111827;
+  font-family: Georgia, "Times New Roman", serif;
+  box-shadow: none;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-sheet input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-grid {
+  display: grid;
+  grid-template-columns: 210px minmax(360px, 1fr) 300px;
+  gap: 12px;
+  align-items: start;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-left,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-main,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-right {
+  display: grid;
+  gap: 10px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-column {
+  display: grid;
+  gap: 8px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-box {
+  display: grid;
+  grid-template-columns: 58px 1fr;
+  grid-template-rows: auto auto;
+  align-items: center;
+  min-height: 78px;
+  padding: 8px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-box span {
+  grid-column: 1 / -1;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: .68rem;
+  font-weight: 900;
+  text-align: center;
+  text-transform: uppercase;
+  color: #273445;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-box input {
+  width: 74px;
+  border: 0;
+  background: transparent;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 2.15rem;
+  font-weight: 900;
+  text-align: center;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-box b {
+  justify-self: end;
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 40px;
+  border: 2px solid #1d2630;
+  border-radius: 50%;
+  background: #fff;
+  font-size: 1.15rem;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-box {
+  padding: 10px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-box h3 {
+  display: block;
+  margin: -2px -2px 8px;
+  padding: 7px 8px;
+  border: 0;
+  border-bottom: 2px solid #1d2630;
+  background: #e9eef6;
+  color: #1c2938;
+  text-align: center;
+  text-shadow: none;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-save-line {
+  display: grid;
+  grid-template-columns: 20px 1fr 48px;
+  gap: 7px;
+  align-items: center;
+  padding: 4px 0;
+  border-bottom: 1px solid #c7d0dc;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-save-line b {
+  justify-self: end;
+  color: #17202a;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-skills-card {
+  max-height: none;
+  overflow: visible;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-skills-table {
+  width: 100%;
+  color: #17202a;
+  font-size: .7rem;
+  border-collapse: collapse;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-skills-table th {
+  color: #273445;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: .62rem;
+  text-transform: uppercase;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-skills-table td {
+  border-bottom: 1px solid #c7d0dc;
+  padding: 2px 3px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-skills-table button {
+  color: #17202a;
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 700;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-top-stats {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(80px, 1fr));
+  gap: 8px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-top-stats > * {
+  display: grid;
+  place-items: center;
+  min-height: 80px;
+  padding: 7px;
+  text-align: center;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-top-stats b {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.6rem;
+  color: #17202a;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-resource-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-resource-grid label {
+  display: grid;
+  gap: 4px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-death-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+  border: 0;
+  background: transparent;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-death-row {
+  display: grid;
+  gap: 6px;
+  color: #17202a;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-sheet .sheet-damage-tools {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-sheet .sheet-damage-tools button,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-sheet .dnd-sheet-foot button {
+  border: 2px solid #1d2630;
+  background: #1f2937;
+  color: #fff;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-attack-card textarea,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-magic-panel textarea,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-bottom textarea,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-right textarea {
+  min-height: 100px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-portrait {
+  display: block;
+  min-height: 300px;
+  padding: 6px;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-portrait .profile-photo-preview {
+  display: grid;
+  width: 100%;
+  height: 300px;
+  place-items: center;
+  border: 1px dashed #8a97a8;
+  background-position: center;
+  background-size: cover;
+  color: #273445;
+  text-align: center;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-portrait b {
+  display: block;
+  font-family: "Cinzel", Georgia, serif;
+  font-size: 3rem;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-passive-box {
+  display: grid;
+  gap: 6px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-passive-box b {
+  border-bottom: 1px solid #c7d0dc;
+  color: #17202a;
+  font-size: .9rem;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-magic-stats,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-slot-grid {
+  color: #17202a;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-bottom {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(180px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-notes-wide {
+  grid-column: 1 / -1;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-sheet-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 2px solid #1d2630;
+}
+
+/* Versao compacta: aproxima a ficha da organizacao da folha 5e oficial. */
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-sheet {
+  width: min(1320px, calc(100vw - 260px));
+  padding: 14px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-head {
+  grid-template-columns: 128px minmax(280px, .9fr) minmax(560px, 1.4fr);
+  gap: 8px;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-dragon-brand {
+  min-height: 64px;
+  border-radius: 24px 4px 24px 4px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-dragon-brand b {
+  font-size: 1.45rem;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-character-name {
+  padding: 8px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-character-name input {
+  font-size: clamp(1.55rem, 2.45vw, 2.45rem);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-identity {
+  grid-template-columns: 1.2fr .55fr 1fr 1fr 1fr .75fr;
+  gap: 6px;
+  padding: 8px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-identity label {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-grid {
+  grid-template-columns: 168px minmax(560px, 1fr) 270px;
+  gap: 8px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-left,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-main,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-right {
+  gap: 7px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-box {
+  padding: 7px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-box h3 {
+  margin: -1px -1px 6px;
+  padding: 5px 7px;
+  font-size: .64rem;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-column {
+  gap: 6px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-box {
+  min-height: 58px;
+  grid-template-columns: 48px 1fr;
+  padding: 5px 7px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-box span {
+  font-size: .62rem;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-box input {
+  width: 56px;
+  font-size: 1.65rem;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-box b {
+  width: 42px;
+  height: 30px;
+  font-size: .98rem;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-save-line {
+  grid-template-columns: 18px 1fr 36px;
+  gap: 5px;
+  padding: 2px 0;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-skills-card {
+  max-height: none;
+  overflow: visible;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-skills-table {
+  font-size: .66rem;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-skills-table th {
+  font-size: .56rem;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-top-stats {
+  grid-template-columns: .8fr .95fr .75fr .9fr .9fr;
+  gap: 6px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-top-stats > * {
+  min-height: 56px;
+  padding: 5px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-top-stats b {
+  font-size: 1.25rem;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-resource-grid {
+  grid-template-columns: repeat(4, minmax(92px, 1fr));
+  gap: 6px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-resource-grid label {
+  gap: 2px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-resource-grid input,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-identity input,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-identity select {
+  min-height: 30px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-resource-grid small {
+  font-size: .62rem;
+  line-height: 1.1;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-death-grid {
+  grid-template-columns: 1fr 1fr;
+  margin-top: 7px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-death-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 28px;
+  padding: 3px 6px;
+  border: 1px solid #c7d0dc;
+  border-radius: 5px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-sheet .sheet-damage-tools {
+  grid-template-columns: 1fr 70px 70px;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-attack-card textarea {
+  min-height: 92px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-magic-panel {
+  display: grid;
+  grid-template-columns: minmax(220px, .95fr) minmax(260px, 1.05fr);
+  gap: 7px;
+  align-items: start;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-magic-panel h3 {
+  grid-column: 1 / -1;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-magic-panel > label {
+  grid-column: 1 / -1;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-magic-panel textarea {
+  min-height: 78px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-portrait {
+  min-height: 170px;
+  padding: 5px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-portrait .profile-photo-preview {
+  height: 170px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-portrait b {
+  font-size: 2.25rem;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-passive-box {
+  gap: 3px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-passive-box b {
+  font-size: .78rem;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-right textarea {
+  min-height: 66px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-bottom {
+  grid-template-columns: 1.15fr 1.05fr 1.05fr .8fr 1.25fr;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-notes-wide {
+  grid-column: auto;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-bottom textarea {
+  min-height: 82px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-sheet-foot {
+  margin-top: 8px;
+  padding-top: 8px;
+}
+
+/* Acabamento medieval para a ficha 5e compacta. */
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-sheet {
+  position: relative;
+  width: min(1360px, calc(100vw - 250px));
+  overflow: visible;
+  border: 4px double #8a5b1d;
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 75% 16%, rgba(174, 42, 54, .14), transparent 26%),
+    radial-gradient(circle at 18% 28%, rgba(201, 154, 65, .22), transparent 32%),
+    linear-gradient(180deg, rgba(255, 247, 218, .98), rgba(233, 203, 141, .96)),
+    #f3dfad;
+  color: #2b170b;
+  box-shadow:
+    0 0 0 6px rgba(43, 23, 11, .7),
+    inset 0 0 0 2px rgba(255, 239, 181, .85),
+    inset 0 0 80px rgba(89, 42, 13, .18),
+    0 28px 80px rgba(0, 0, 0, .58);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-sheet::before {
+  pointer-events: none;
+  display: block;
+  content: "";
+  position: absolute;
+  inset: 10px;
+  z-index: 0;
+  border: 1px solid rgba(114, 63, 18, .58);
+  border-radius: 11px;
+  background:
+    url("./assets/dnd-corner-ornament.svg") left top / 112px 112px no-repeat,
+    url("./assets/dnd-corner-ornament.svg") right top / 112px 112px no-repeat,
+    url("./assets/dnd-corner-ornament.svg") left bottom / 112px 112px no-repeat,
+    url("./assets/dnd-corner-ornament.svg") right bottom / 112px 112px no-repeat,
+    radial-gradient(circle at 50% 0, rgba(126, 32, 28, .12), transparent 42%);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-sheet::after {
+  pointer-events: none;
+  display: block;
+  content: "";
+  position: absolute;
+  inset: 30px 34px auto;
+  height: 22px;
+  z-index: 0;
+  border-top: 3px double rgba(117, 62, 17, .75);
+  border-bottom: 1px solid rgba(255, 231, 162, .65);
+  background:
+    linear-gradient(90deg, transparent, rgba(126, 32, 28, .5), transparent);
+  opacity: .78;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-grid {
+  grid-template-columns: 182px minmax(640px, 1fr) 288px;
+  gap: 14px;
+  align-items: start;
+  overflow: visible;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-left,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-main,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-right {
+  min-width: 0;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-character-name,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-identity,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-box,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-box,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-top-stats > *,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-portrait {
+  border-color: #9b6a24;
+  background:
+    linear-gradient(180deg, rgba(255, 243, 199, .96), rgba(224, 183, 102, .9)),
+    #efd28f;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 247, 206, .65),
+    0 2px 0 rgba(77, 36, 10, .28);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-box h3 {
+  border-bottom-color: #9b6a24;
+  background:
+    linear-gradient(90deg, #3a170b, #7b2418 52%, #3a170b);
+  color: #ffe8a7;
+  text-shadow: 0 1px 0 #000;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-dragon-brand {
+  border-color: #9b6a24;
+  background:
+    radial-gradient(circle at 50% 35%, rgba(255, 238, 175, .9), transparent 45%),
+    linear-gradient(180deg, #4b180f, #1b0b06);
+  color: #ffe8a7;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-character-name input {
+  border-bottom-color: #8a5b1d;
+  color: #4a170c;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-box {
+  min-height: 66px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-attributes-title {
+  margin: 0 0 7px;
+  padding: 7px 10px;
+  border: 2px solid #9b6a24;
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, #3a170b, #7b2418 52%, #3a170b);
+  color: #ffe8a7;
+  font-family: "Cinzel", Georgia, serif;
+  font-size: .82rem;
+  font-weight: 900;
+  text-align: center;
+  text-transform: uppercase;
+  text-shadow: 0 1px 0 #000;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 247, 206, .22),
+    0 2px 0 rgba(77, 36, 10, .28);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-column {
+  transform: translateX(-8px);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-top-stats {
+  width: min(100%, 380px);
+  grid-template-columns: .72fr .9fr .76fr .9fr .82fr;
+  justify-self: end;
+  margin-top: 16px;
+  transform: translateX(54px);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-resources-box {
+  width: min(100%, 380px);
+  min-height: 520px;
+  justify-self: end;
+  margin-top: 8px;
+  transform: translateX(54px);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-resource-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 9px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-resource-grid label {
+  min-height: 76px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-sheet .sheet-damage-tools {
+  grid-template-columns: 1fr 58px 58px;
+  margin-top: 16px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-magic-panel {
+  margin-top: 0;
+  grid-template-columns: minmax(210px, .82fr) minmax(310px, 1.18fr);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-magic-panel textarea {
+  min-height: 110px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-right .dnd-grimoire-panel {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  padding: 8px;
+  background:
+    radial-gradient(circle at 85% 10%, rgba(116, 20, 29, .18), transparent 34%),
+    linear-gradient(180deg, rgba(255, 239, 179, .96), rgba(221, 174, 82, .92));
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-main {
+  align-content: start;
+  justify-items: end;
+  overflow: visible;
+  transform: translate(var(--dnd-panel-x, 0px), calc(var(--dnd-panel-y, 0px) + 34px));
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-attack-card {
+  width: min(100%, 380px);
+  justify-self: end;
+  margin-top: 8px;
+  transform: translateX(54px);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-right .dnd-grimoire-panel h3,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-right .dnd-grimoire-panel > label {
+  grid-column: auto;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-right .dnd-grimoire-panel .dnd-magic-stats {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 7px;
+  align-items: end;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-right .dnd-grimoire-panel .dnd-magic-stats label {
+  display: grid;
+  gap: 3px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-right .dnd-grimoire-panel .dnd-magic-stats b {
+  display: grid;
+  min-width: 62px;
+  min-height: 38px;
+  place-items: center;
+  border: 1px solid #9b6a24;
+  border-radius: 6px;
+  background: rgba(255, 248, 222, .8);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-right .dnd-grimoire-panel .dnd-slot-grid {
+  display: grid;
+  grid-template-columns: 1fr 58px 58px;
+  gap: 5px;
+  align-items: center;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-right .dnd-grimoire-panel .dnd-slot-grid > span {
+  padding: 4px;
+  border-bottom: 1px solid rgba(92, 45, 15, .35);
+  color: #5a2513;
+  font-size: .62rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-right .dnd-grimoire-panel .dnd-slot-grid label {
+  display: contents;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-right .dnd-grimoire-panel .dnd-slot-grid label span {
+  align-self: stretch;
+  padding: 6px 4px;
+  border-bottom: 1px solid rgba(92, 45, 15, .22);
+  color: #3a170b;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-right .dnd-grimoire-panel .dnd-slot-grid input {
+  min-height: 30px;
+  text-align: center;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-right .dnd-grimoire-panel textarea {
+  min-height: 132px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-portrait {
+  min-height: 350px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-portrait .profile-photo-preview {
+  height: auto;
+  min-height: 338px;
+  aspect-ratio: 4 / 5;
+  background-color: rgba(48, 25, 13, .55);
+  background-size: cover;
+  background-repeat: no-repeat;
+  border: 2px solid #8a5b1d;
+  border-radius: 12px;
+  box-shadow: inset 0 0 35px rgba(0, 0, 0, .26);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-portrait b {
+  color: #7b2418;
+  text-shadow: 0 1px 0 rgba(255, 232, 167, .8);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-right textarea,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-bottom textarea,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-attack-card textarea,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-magic-panel textarea {
+  background: rgba(255, 248, 222, .92);
+  border-color: #b5873d;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-equipment-rules {
+  display: grid;
+  grid-template-columns: 1fr 1fr minmax(90px, .75fr);
+  gap: 8px;
+  align-items: end;
+  margin-bottom: 10px;
+  padding: 8px;
+  border: 1px dashed rgba(104, 52, 19, .45);
+  background: rgba(90, 41, 14, .06);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-equipment-wide {
+  grid-column: 1 / -1;
+  min-height: 220px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-equipment-wide button,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-inventory-add button {
+  width: fit-content;
+  margin-top: 8px;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-equipment-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(160px, 1fr));
+  gap: 10px;
+  align-items: start;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-equipment-sector {
+  min-height: 92px;
+  padding: 9px;
+  border: 1px solid rgba(128, 77, 25, .55);
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(255, 246, 211, .7), rgba(218, 168, 79, .24));
+  box-shadow: inset 0 0 18px rgba(70, 35, 13, .12);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-equipment-sector b {
+  display: block;
+  margin-bottom: 6px;
+  color: #541b0f;
+  text-transform: uppercase;
+  font-size: .72rem;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-equipment-sector ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-equipment-sector li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(94, 51, 19, .18);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-equipment-sector small,
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-empty-equipment {
+  color: #6c4a27;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-inventory-add {
+  display: grid;
+  grid-template-columns: 170px minmax(220px, 1fr) minmax(180px, 1fr) 90px auto;
+  gap: 10px;
+  align-items: end;
+  margin: 14px 0 18px;
+  padding: 12px;
+  border: 2px solid #8f5b1e;
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(245, 219, 153, .72), rgba(198, 140, 49, .34));
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-inventory-add label {
+  display: grid;
+  gap: 4px;
+  color: #301308;
+  font-weight: 900;
+  text-transform: uppercase;
+  font-size: .68rem;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-inventory-section {
+  margin: 18px 0;
+  padding: 12px;
+  border: 2px solid rgba(87, 40, 12, .65);
+  border-radius: 8px;
+  background: rgba(80, 36, 12, .08);
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-inventory-section > h3 {
+  display: inline-block;
+  margin: -25px 0 12px;
+  padding: 6px 18px;
+  border: 1px solid #b8893e;
+  background: linear-gradient(90deg, #4a140b, #7b2314);
+  color: #ffe9aa;
+  text-transform: uppercase;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-inventory-card .inventory-card-head {
+  align-items: center;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-item-category-pill {
+  padding: 4px 8px;
+  border: 1px solid rgba(112, 67, 24, .55);
+  border-radius: 999px;
+  background: rgba(255, 232, 160, .65);
+  color: #4b1a0d;
+  font-size: .72rem;
+  font-weight: 900;
+}
+
+:is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-inventory-card .inventory-edit-grid {
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+}
+
+@media (max-width: 980px) {
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .archive-topbar {
+    min-height: 72px;
+  }
+
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) #viewTitle {
+    font-size: 1.6rem;
+  }
+
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-sheet {
+    width: calc(100vw - 32px);
+  }
+
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-hero-top,
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-hero-body,
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-character-stage,
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-magic-grid,
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-notes-grid {
+    grid-template-columns: 1fr;
+  }
+
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-character-stage {
+    grid-template-areas:
+      "portrait"
+      "abilities"
+      "combat"
+      "vitals"
+      "death"
+      "damage";
+  }
+
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-hero-portrait {
+    max-width: none;
+    min-height: 320px;
+  }
+
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-sheet {
+    width: calc(100vw - 32px);
+  }
+
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-head,
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-grid,
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-bottom {
+    grid-template-columns: 1fr;
+  }
+
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-top-stats,
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-resource-grid,
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-identity {
+    grid-template-columns: repeat(2, minmax(120px, 1fr));
+  }
+}

@@ -1,0 +1,736 @@
+/* =========================
+   Responsive Layout
+   Desktop rules stay in the existing theme files.
+========================= */
+
+@media (max-width: 1200px) {
+  html,
+  body {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  .portal-grid,
+  .orbe-system-cards,
+  .portal-columns {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .archive-dashboard.active-view {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .right-stack,
+  .master-shield {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .right-stack {
+    grid-template-columns: repeat(2, minmax(260px, 1fr));
+  }
+
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-sheet,
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-sheet {
+    width: min(100%, calc(100vw - 40px));
+  }
+}
+
+@media (max-width: 1024px) {
+  body:has(#loginScreen:not(.hidden)),
+  body:has(#portalScreen:not(.hidden)) {
+    overflow-x: hidden;
+  }
+
+  #loginScreen.login-screen {
+    min-height: 100dvh;
+    align-content: start;
+    justify-items: center;
+    gap: 18px;
+    padding: 22px clamp(14px, 4vw, 28px) 110px;
+    overflow-y: auto;
+  }
+
+  .orbe-login-topbar {
+    position: relative;
+    inset: auto;
+    width: min(100%, 720px);
+    flex-wrap: wrap;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .orbe-login-links {
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 10px 18px;
+  }
+
+  .orbe-language {
+    min-height: 40px;
+  }
+
+  #loginForm.login-folder {
+    width: min(100%, 680px);
+    padding: 0;
+    margin: 0;
+  }
+
+  .orbe-logo-image {
+    width: min(520px, 82vw);
+    max-height: 160px;
+  }
+
+  .orbe-login-card {
+    width: 100%;
+    padding: clamp(20px, 4vw, 30px);
+  }
+
+  #loginScreen .orbe-connection-panel {
+    position: relative;
+    inset: auto;
+    display: grid;
+    width: min(100%, 360px);
+    height: 360px;
+    margin: 0 auto 18px;
+    transform: none;
+  }
+
+  #loginScreen .orbe-connection-panel::before {
+    inset: 18px;
+  }
+
+  #loginScreen .orbe-connection-panel::after {
+    inset: 48px;
+  }
+
+  #loginScreen .orbe-rune-ring {
+    inset: 30px;
+    transform: scale(.88);
+  }
+
+  #loginScreen .orbe-status-orb {
+    width: 132px;
+    height: 132px;
+  }
+
+  #loginScreen .orbe-connection-copy {
+    left: 26px;
+    right: 26px;
+    bottom: 28px;
+  }
+
+  #loginScreen .orbe-login-benefits {
+    position: relative;
+    width: min(100%, 680px);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-top: 0;
+  }
+
+  .portal-screen {
+    min-height: 100dvh;
+    padding: 18px;
+    overflow-x: hidden;
+  }
+
+  .portal-folder {
+    width: 100%;
+  }
+
+  .portal-head {
+    grid-template-columns: 1fr;
+    gap: 14px;
+    text-align: center;
+  }
+
+  .portal-head > div:first-of-type,
+  .orbe-top-nav,
+  .portal-actions {
+    grid-column: 1;
+  }
+
+  .orbe-top-nav {
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .portal-actions {
+    justify-self: center;
+  }
+
+  .portal-grid,
+  .portal-grid-slim,
+  .portal-home-showcase,
+  .orbe-system-cards,
+  .portal-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .portal-page.active .portal-about,
+  .portal-intro dl {
+    grid-template-columns: 1fr;
+  }
+
+  .portal-card,
+  .portal-home-showcase article,
+  .portal-list-panel,
+  .orbe-system-card,
+  .portal-columns > section {
+    min-width: 0;
+  }
+
+  .app-shell,
+  .archive-shell,
+  .archive-shell.sidebar-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .folder-sidebar {
+    position: fixed;
+    z-index: 80;
+    inset: 0 auto 0 0;
+    width: min(86vw, 320px);
+    max-width: 320px;
+    height: 100dvh;
+    overflow-y: auto;
+    transition: transform .22s ease, opacity .22s ease;
+    box-shadow: 18px 0 42px rgba(0, 0, 0, .5);
+  }
+
+  .archive-shell.sidebar-collapsed .folder-sidebar {
+    transform: translateX(-110%);
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .archive-shell:not(.sidebar-collapsed) .folder-sidebar {
+    transform: translateX(0);
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .workspace {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .sidebar-toggle,
+  .top-refresh-button {
+    min-height: 44px;
+  }
+
+  .view {
+    width: 100%;
+    max-width: 100%;
+    padding: 12px;
+  }
+
+  .archive-dashboard.active-view {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .map-frame {
+    width: 100%;
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  .battlefield-wrap {
+    width: 100%;
+    max-width: 100%;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x pan-y;
+  }
+
+  .battlefield {
+    max-width: none;
+  }
+
+  .map-quick-tools {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 6px;
+    max-width: 100%;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+
+  .map-quick-tools details {
+    flex: 0 0 auto;
+    max-width: min(86vw, 360px);
+  }
+
+  .map-quick-tools details[open] {
+    max-height: 70dvh;
+    overflow-y: auto;
+  }
+
+  .map-tools {
+    position: sticky;
+    right: 8px;
+    bottom: 8px;
+    opacity: 1;
+    pointer-events: auto;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+  }
+
+  .map-tools .mini-tab,
+  .map-quick-tools summary,
+  .map-quick-tools button {
+    min-height: 40px;
+  }
+
+  .right-stack {
+    grid-template-columns: 1fr;
+  }
+
+  .crt-monitor,
+  .map-chat-panel,
+  .revealed-clues,
+  .soundtrack-panel,
+  .voice-panel,
+  .active-sheet-card {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .chat-form,
+  .soundtrack-form,
+  .voice-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .master-shield-list,
+  .npc-mini-cards,
+  .inventory-sheet-picker {
+    grid-template-columns: 1fr;
+  }
+
+  .master-shield-card,
+  .token-row,
+  .inventory-card {
+    min-width: 0;
+  }
+
+  .sheet-layout,
+  .stats-grid,
+  .resource-grid,
+  .three-cols,
+  .inventory-edit-grid,
+  .dnd-inventory-card .inventory-edit-grid,
+  .dnd-inventory-add {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-sheet,
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-sheet {
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+  }
+
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-head,
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-grid,
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-bottom {
+    grid-template-columns: 1fr;
+  }
+
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-main {
+    transform: none;
+    justify-items: stretch;
+  }
+
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-identity,
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-top-stats,
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-combat-grid,
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-magic-stats,
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-equipment-rules {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-column {
+    transform: none;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-portrait {
+    min-height: 260px;
+  }
+
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-portrait .profile-photo-preview {
+    min-height: 250px;
+  }
+
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-equipment-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-slot-grid {
+    overflow-x: auto;
+  }
+}
+
+@media (max-width: 768px) {
+  body,
+  input,
+  select,
+  textarea,
+  button {
+    font-size: 16px;
+  }
+
+  button,
+  .menu-button,
+  .tab,
+  input,
+  select,
+  textarea {
+    min-height: 44px;
+  }
+
+  #loginScreen.login-screen {
+    padding: 16px 12px 34px;
+  }
+
+  .orbe-login-topbar {
+    display: none;
+  }
+
+  .orbe-logo-image {
+    width: min(390px, 88vw);
+    max-height: 120px;
+  }
+
+  .login-folder .orbe-login-brand > p {
+    font-size: 1rem;
+    text-align: center;
+  }
+
+  .orbe-login-card {
+    padding: 18px;
+  }
+
+  .password-line,
+  .orbe-login-inline,
+  .orbe-login-card .login-actions,
+  .login-actions,
+  .login-secondary-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .password-line button {
+    width: 100%;
+  }
+
+  #loginScreen .orbe-connection-panel {
+    width: min(100%, 300px);
+    height: 300px;
+  }
+
+  #loginScreen .orbe-rune-ring {
+    transform: scale(.72);
+  }
+
+  #loginScreen .orbe-status-orb {
+    width: 112px;
+    height: 112px;
+  }
+
+  #loginScreen .orbe-connection-copy {
+    left: 18px;
+    right: 18px;
+    bottom: 22px;
+  }
+
+  #loginScreen .orbe-login-benefits {
+    grid-template-columns: 1fr;
+  }
+
+  .portal-screen {
+    padding: 12px;
+  }
+
+  .portal-folder,
+  .portal-card,
+  .portal-home-showcase article,
+  .portal-list-panel,
+  .orbe-systems-panel,
+  .portal-columns > section {
+    padding: 16px;
+  }
+
+  .portal-intro h2 {
+    font-size: clamp(2rem, 13vw, 3.2rem);
+  }
+
+  .portal-head .orbe-logo-image {
+    width: min(220px, 70vw);
+  }
+
+  .orbe-top-nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .portal-hero-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .portal-card label,
+  .portal-card input,
+  .portal-card select,
+  .portal-card button {
+    width: 100%;
+  }
+
+  .topbar {
+    padding: 10px 12px;
+  }
+
+  .topbar > div {
+    min-width: 0;
+  }
+
+  .topbar h2 {
+    font-size: 1.2rem;
+  }
+
+  .map-frame {
+    padding: 8px;
+  }
+
+  .map-label {
+    max-width: calc(100% - 24px);
+    font-size: .88rem;
+  }
+
+  .battlefield-wrap {
+    min-height: 360px;
+    max-height: 65dvh;
+  }
+
+  .right-stack,
+  .master-shield,
+  .paper-panel,
+  .dark-panel {
+    max-width: 100%;
+  }
+
+  .crt-screen {
+    min-height: 220px;
+  }
+
+  .crt-roll-control,
+  .chat-form,
+  .sheet-damage-tools,
+  .soundtrack-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .inventory-card,
+  .dnd-inventory-card {
+    grid-template-columns: 1fr;
+  }
+
+  .inventory-photo-wrap {
+    width: 100%;
+  }
+
+  .catalog-thumb,
+  .custom-photo-thumb {
+    width: 96px;
+    height: 78px;
+  }
+
+  .sheet-layout,
+  .stats-grid,
+  .resource-grid,
+  .three-cols,
+  .inventory-edit-grid,
+  .dnd-inventory-card .inventory-edit-grid,
+  .dnd-inventory-add,
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-identity,
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-top-stats,
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-combat-grid,
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-magic-stats,
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-equipment-rules,
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-equipment-summary {
+    grid-template-columns: 1fr;
+  }
+
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-sheet {
+    padding: 10px;
+    border-width: 4px;
+  }
+
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-head {
+    gap: 10px;
+  }
+
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-dragon-brand {
+    min-height: 80px;
+  }
+
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-column {
+    grid-template-columns: 1fr;
+  }
+
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-box {
+    grid-template-columns: 70px 1fr;
+    min-height: 72px;
+  }
+
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-portrait {
+    min-height: 300px;
+  }
+
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-portrait .profile-photo-preview {
+    min-height: 290px;
+    background-size: cover;
+  }
+
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-bottom textarea,
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-right textarea,
+  textarea {
+    min-height: 120px;
+  }
+
+  .file-view .sheet-layout,
+  .dossier-view,
+  .inventory-linked,
+  .notes-panel,
+  .missions-panel {
+    width: 100%;
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .view,
+  .side-panel,
+  .folder-sidebar,
+  .paper-panel,
+  .dark-panel {
+    padding: 10px;
+  }
+
+  #loginScreen.login-screen {
+    gap: 12px;
+  }
+
+  .orbe-login-card {
+    padding: 14px;
+  }
+
+  .orbe-login-card .login-enter {
+    min-height: 54px;
+  }
+
+  #loginScreen .orbe-connection-panel {
+    width: min(100%, 260px);
+    height: 260px;
+  }
+
+  #loginScreen .orbe-rune-ring {
+    transform: scale(.58);
+  }
+
+  #loginScreen .orbe-status-orb {
+    width: 92px;
+    height: 92px;
+  }
+
+  .portal-folder,
+  .portal-card,
+  .portal-home-showcase article,
+  .portal-list-panel,
+  .orbe-systems-panel,
+  .portal-columns > section {
+    padding: 12px;
+  }
+
+  .orbe-top-nav {
+    grid-template-columns: 1fr;
+  }
+
+  .folder-sidebar {
+    width: min(92vw, 300px);
+  }
+
+  .topbar {
+    gap: 8px;
+  }
+
+  .topbar h2 {
+    font-size: 1.05rem;
+  }
+
+  .battlefield-wrap {
+    min-height: 320px;
+    max-height: 58dvh;
+  }
+
+  .map-tools .mini-tab,
+  .map-quick-tools summary {
+    min-width: 44px;
+  }
+
+  .token-name-label {
+    font-size: .7rem;
+  }
+
+  .master-shield-list,
+  .npc-mini-cards,
+  .inventory-sheet-picker {
+    gap: 10px;
+  }
+
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-sheet {
+    padding: 8px;
+  }
+
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-identity,
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-box,
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-box,
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-top-stats > *,
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-classic-portrait {
+    border-width: 1px;
+  }
+
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-ability-box {
+    grid-template-columns: 58px 1fr;
+  }
+
+  :is(body.theme-dnd5e, body[data-campaign-system="dnd5e"]) .dnd-equipment-sector li {
+    display: grid;
+  }
+}
+
+#fichas .legacy-editor,
+#fichas .sheet-editor,
+#fichas .sheet-list {
+  display: none !important;
+}

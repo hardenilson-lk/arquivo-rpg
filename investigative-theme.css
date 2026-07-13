@@ -476,9 +476,14 @@ body {
   opacity: .72;
 }
 
-.inventory-linked {
+.inventory-linked,
+.rituals-linked {
   display: grid;
   gap: 16px;
+}
+
+.rituals-linked .sheet-info-cards {
+  margin-top: 0;
 }
 
 .inventory-list.detailed {
@@ -1906,6 +1911,448 @@ label {
   text-shadow: 0 0 8px rgba(116,255,106,.45);
 }
 
+.voice-panel,
+.soundtrack-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.voice-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.voice-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.voice-mic-lamp {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 1px solid rgba(42, 22, 13, .55);
+  background: #42543b;
+  box-shadow: 0 0 0 rgba(116, 255, 106, 0);
+}
+
+.voice-mic-lamp.off {
+  background: #3f352b;
+  box-shadow: inset 0 0 8px rgba(0,0,0,.5);
+}
+
+.voice-mic-lamp.active {
+  background: #63ff58;
+  animation: voiceLampActive 1.25s ease-in-out infinite;
+}
+
+.voice-mic-lamp.muted {
+  background: #9f1919;
+  box-shadow: 0 0 14px rgba(159, 25, 25, .7);
+}
+
+.voice-mic-lamp.monitoring {
+  background: #f0c23a;
+  animation: voiceLampMonitor .72s steps(2, end) infinite;
+}
+
+@keyframes voiceLampActive {
+  0%, 100% { box-shadow: 0 0 8px rgba(99, 255, 88, .62), 0 0 0 0 rgba(99, 255, 88, .3); }
+  50% { box-shadow: 0 0 18px rgba(99, 255, 88, .9), 0 0 0 5px rgba(99, 255, 88, .08); }
+}
+
+@keyframes voiceLampMonitor {
+  0% { box-shadow: 0 0 7px rgba(240, 194, 58, .7); transform: scale(.94); }
+  100% { box-shadow: 0 0 18px rgba(240, 194, 58, 1), 0 0 0 5px rgba(240, 194, 58, .1); transform: scale(1.08); }
+}
+
+.voice-head h2,
+.soundtrack-panel h2 {
+  margin: 0;
+}
+
+#voiceStatus {
+  color: #7a2b22;
+  font-size: .62rem;
+  text-transform: uppercase;
+}
+
+#voiceStatus.voice-alert {
+  color: #a31616;
+  text-shadow: 0 0 8px rgba(163, 22, 22, .22);
+}
+
+.voice-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.voice-actions.small {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.voice-actions button,
+.soundtrack-form button,
+.soundtrack-list button {
+  min-width: 0;
+  padding: 8px 7px;
+  border: 1px solid #2a160d;
+  background: linear-gradient(#3b2417, #1b0d07);
+  color: #f4e5c0;
+  font-family: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.voice-actions button:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+.voice-participants {
+  display: grid;
+  gap: 5px;
+  min-height: 28px;
+  padding: 7px;
+  border: 1px dashed rgba(56, 31, 17, .45);
+  background: rgba(255,255,255,.1);
+  font-size: .74rem;
+}
+
+.voice-participants span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid rgba(41, 24, 15, .18);
+}
+
+.voice-participants small {
+  color: #6e5a43;
+  font-size: .58rem;
+  text-transform: uppercase;
+}
+
+.voice-participants .voice-master b {
+  color: #8a1919;
+}
+
+.voice-remote-audio {
+  display: none;
+}
+
+.soundtrack-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+
+.soundtrack-panel > .soundtrack-form,
+.soundtrack-panel > .soundtrack-list {
+  display: none;
+}
+
+.soundtrack-form input {
+  min-width: 0;
+  border: 1px solid rgba(63, 37, 20, .45);
+  background: rgba(255,248,223,.55);
+  color: #1a1009;
+  font-family: inherit;
+  padding: 8px;
+}
+
+.soundtrack-controls {
+  display: grid;
+  grid-template-columns: auto minmax(72px, 1fr) 42px;
+  align-items: center;
+  gap: 7px;
+  padding: 6px;
+  border: 1px solid rgba(63, 37, 20, .28);
+  background: rgba(255,255,255,.08);
+  font-size: .64rem;
+}
+
+.soundtrack-controls label,
+.soundtrack-controls span {
+  font-weight: 800;
+  color: #2b1b10;
+}
+
+.soundtrack-controls input[type="range"] {
+  width: 100%;
+  min-width: 0;
+}
+
+.soundtrack-controls.provider-controlled {
+  opacity: .78;
+}
+
+.soundtrack-controls.provider-controlled input[type="range"] {
+  cursor: not-allowed;
+  filter: grayscale(.75);
+}
+
+.soundtrack-player {
+  min-height: 58px;
+  border: 1px solid rgba(63, 37, 20, .35);
+  background: rgba(22, 13, 8, .08);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  font-size: .75rem;
+}
+
+.soundtrack-player iframe {
+  width: 100%;
+  height: 82px;
+  border: 0;
+}
+
+.soundtrack-player.spotify iframe {
+  height: 152px;
+  min-height: 152px;
+}
+
+.soundtrack-player.spotify {
+  min-height: 178px;
+  place-items: stretch;
+}
+
+.spotify-safe-card {
+  min-height: 78px;
+}
+
+.soundtrack-player.audio {
+  min-height: 82px;
+}
+
+.soundtrack-player audio {
+  width: 100%;
+}
+
+.soundtrack-player small {
+  display: block;
+  padding: 0 8px 7px;
+  color: #4d3520;
+  font-size: .55rem;
+  line-height: 1.25;
+}
+
+.soundtrack-provider-note {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 8px;
+  align-items: center;
+  padding: 8px;
+  border-top: 1px solid rgba(63, 37, 20, .24);
+  background: rgba(255, 242, 205, .72);
+}
+
+.soundtrack-provider-note b {
+  color: #2b1b10;
+  font-size: .68rem;
+}
+
+.soundtrack-provider-note span {
+  grid-column: 1 / -1;
+  color: #4d3520;
+  font-size: .56rem;
+  line-height: 1.25;
+}
+
+.soundtrack-provider-note a {
+  grid-column: 2;
+  grid-row: 1;
+  padding: 6px 8px;
+  border: 1px solid #2a160d;
+  background: linear-gradient(#3b2417, #1b0d07);
+  color: #f4e5c0;
+  text-decoration: none;
+  font-size: .62rem;
+  font-weight: 800;
+}
+
+.soundtrack-player.youtube {
+  min-height: 226px;
+  background:
+    linear-gradient(90deg, rgba(24, 14, 8, .86), rgba(70, 38, 20, .56)),
+    repeating-linear-gradient(to right, rgba(255,255,255,.05) 0 1px, transparent 1px 8px);
+}
+
+.soundtrack-player.youtube iframe {
+  height: 158px;
+}
+
+.soundtrack-audio-card {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 8px;
+  align-items: center;
+  padding: 8px;
+}
+
+.soundtrack-audio-card b {
+  color: #f4e5c0;
+  font-size: .72rem;
+}
+
+.soundtrack-audio-card span {
+  grid-column: 1 / -1;
+  color: #d0b98f;
+  font-size: .58rem;
+  line-height: 1.25;
+}
+
+.soundtrack-audio-card a {
+  grid-column: 2;
+  grid-row: 1;
+  padding: 7px 9px;
+  border: 1px solid #2a160d;
+  background: linear-gradient(#3b2417, #1b0d07);
+  color: #f4e5c0;
+  text-decoration: none;
+  font-size: .68rem;
+  font-weight: 800;
+}
+
+.soundtrack-direct-audio audio {
+  grid-column: 1 / -1;
+}
+
+.soundtrack-audio-actions {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.soundtrack-audio-actions button {
+  padding: 7px;
+  border: 1px solid #2a160d;
+  background: linear-gradient(#3b2417, #1b0d07);
+  color: #f4e5c0;
+  font: inherit;
+  font-size: .66rem;
+  font-weight: 800;
+}
+
+.soundtrack-list {
+  display: grid;
+  gap: 6px;
+  max-height: 150px;
+  overflow: auto;
+}
+
+.soundtrack-list article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 5px;
+  padding: 6px;
+  border: 1px solid rgba(63, 37, 20, .28);
+  background: rgba(255,255,255,.08);
+}
+
+.soundtrack-list article.active {
+  box-shadow: inset 4px 0 0 #8a1919;
+}
+
+.soundtrack-list span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: .72rem;
+}
+
+.soundtrack-library-app {
+  display: grid;
+  gap: 16px;
+}
+
+.soundtrack-studio-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.soundtrack-studio-card,
+.soundtrack-effect-pad,
+.soundtrack-library-list {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid rgba(54, 38, 25, .42);
+  background: rgba(255,255,255,.14);
+}
+
+.soundtrack-studio-card h3,
+.soundtrack-effect-pad h3,
+.soundtrack-library-list h3,
+.soundtrack-category h4 {
+  margin: 0;
+  font-family: "Special Elite", "Courier Prime", monospace;
+  text-transform: uppercase;
+}
+
+.soundtrack-studio-card label {
+  display: grid;
+  gap: 5px;
+  font-weight: 900;
+  text-transform: uppercase;
+  font-size: .72rem;
+}
+
+.soundtrack-studio-card input,
+.soundtrack-studio-card select {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid rgba(63, 37, 20, .45);
+  background: rgba(255,248,223,.62);
+  color: #1a1009;
+  font-family: inherit;
+  padding: 7px;
+}
+
+.soundtrack-effect-pad > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.soundtrack-category {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.soundtrack-category article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid rgba(54, 38, 25, .32);
+  background: rgba(255,244,214,.36);
+}
+
+.soundtrack-category article.active {
+  box-shadow: inset 5px 0 0 #8a1919;
+  background: rgba(245,213,116,.28);
+}
+
+.soundtrack-category b,
+.soundtrack-category small {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .roll-result {
   appearance: none;
   width: 100%;
@@ -3045,5 +3492,291 @@ label {
 
   .archive-topbar {
     display: grid;
+  }
+}
+
+.dnd-sheet {
+  width: min(1180px, calc(100vw - 360px));
+  margin: 24px auto 48px;
+  padding: 26px;
+  border: 1px solid rgba(214, 166, 92, .42);
+  background:
+    linear-gradient(180deg, rgba(22, 18, 14, .94), rgba(9, 8, 7, .96)),
+    repeating-linear-gradient(0deg, rgba(255,255,255,.025) 0 1px, transparent 1px 7px);
+  color: #eadfc8;
+  box-shadow: 0 24px 70px rgba(0,0,0,.38), inset 0 0 0 1px rgba(255,255,255,.04);
+}
+
+.dnd-sheet-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: flex-start;
+  margin-bottom: 22px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid rgba(214, 166, 92, .32);
+}
+
+.dnd-system-pill {
+  display: inline-block;
+  margin-bottom: 8px;
+  padding: 5px 10px;
+  border: 1px solid rgba(214, 166, 92, .45);
+  background: rgba(55, 31, 15, .74);
+  color: #f1d596;
+  text-transform: uppercase;
+  font-weight: 800;
+}
+
+.dnd-sheet h2,
+.dnd-sheet h3 {
+  margin: 0 0 10px;
+  color: #f3dfaa;
+  font-family: "IM Fell English", Georgia, serif;
+}
+
+.dnd-sheet p {
+  margin: 0;
+  color: #cdbb96;
+}
+
+.dnd-avatar {
+  width: 92px;
+  min-width: 92px;
+}
+
+.dnd-avatar .profile-photo-preview {
+  width: 92px;
+  height: 92px;
+}
+
+.dnd-identity-grid,
+.dnd-notes-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.dnd-core-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, .8fr);
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.dnd-card,
+.dnd-notes-grid label {
+  padding: 16px;
+  border: 1px solid rgba(214, 166, 92, .28);
+  background: rgba(231, 205, 154, .08);
+}
+
+.dnd-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(90px, 1fr));
+  gap: 12px;
+}
+
+.dnd-sheet label,
+.dnd-stat {
+  display: grid;
+  gap: 6px;
+  color: #f1e6cf;
+  font-weight: 800;
+}
+
+.dnd-sheet input,
+.dnd-sheet textarea {
+  width: 100%;
+  border: 1px solid rgba(214, 166, 92, .34);
+  background: rgba(5, 4, 3, .68);
+  color: #f9efd9;
+  padding: 10px;
+  font-family: inherit;
+}
+
+.dnd-sheet textarea {
+  min-height: 120px;
+  resize: vertical;
+}
+
+.dnd-stat input {
+  min-height: 54px;
+  text-align: center;
+  font-size: 1.45rem;
+  font-weight: 900;
+}
+
+.dnd-vitals {
+  display: grid;
+  gap: 12px;
+}
+
+.dnd-derived-grid,
+.dnd-ac-grid,
+.dnd-hitdice-grid,
+.dnd-death-grid,
+.dnd-magic-stats,
+.dnd-rules-grid,
+.dnd-magic-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.dnd-derived-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.dnd-derived-grid b {
+  display: grid;
+  place-items: center;
+  min-height: 50px;
+  border: 1px solid rgba(214, 166, 92, .32);
+  background: rgba(5, 4, 3, .42);
+  color: #ffe6aa;
+}
+
+.dnd-ac-grid,
+.dnd-hitdice-grid,
+.dnd-death-grid,
+.dnd-magic-stats {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.dnd-rules-grid,
+.dnd-magic-grid {
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, .8fr);
+  margin-bottom: 18px;
+}
+
+.dnd-stat b {
+  display: block;
+  margin: -4px 0 2px;
+  color: #ffe7ad;
+  font-size: 1.15rem;
+  text-align: center;
+}
+
+.dnd-stat small {
+  color: #bfae89;
+  text-align: center;
+}
+
+.dnd-check,
+.dnd-death-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.dnd-check input,
+.dnd-death-row input {
+  width: auto;
+}
+
+.dnd-skills-card {
+  overflow: auto;
+}
+
+.dnd-skills-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 560px;
+}
+
+.dnd-skills-table th,
+.dnd-skills-table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid rgba(214, 166, 92, .18);
+  text-align: left;
+}
+
+.dnd-skills-table th {
+  color: #ffe0a0;
+  font-size: .78rem;
+  text-transform: uppercase;
+}
+
+.dnd-skills-table button {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: #f5e7c9;
+  font-weight: 800;
+}
+
+.dnd-slot-grid {
+  display: grid;
+  grid-template-columns: 1fr 90px 90px;
+  gap: 8px;
+  align-items: center;
+  margin: 10px 0 14px;
+}
+
+.dnd-slot-grid > span {
+  color: #ffe0a0;
+  font-size: .75rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.dnd-slot-grid label {
+  display: contents;
+}
+
+.dnd-slot-grid label span {
+  align-self: center;
+}
+
+.dnd-slot-grid input {
+  min-width: 0;
+}
+
+.dnd-inspiration {
+  justify-content: flex-start;
+  margin-bottom: 10px;
+}
+
+.dnd-sheet-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(214, 166, 92, .28);
+}
+
+.dnd-sheet-foot button,
+.dnd-sheet .sheet-damage-tools button {
+  border: 1px solid rgba(235, 183, 95, .55);
+  background: linear-gradient(180deg, #5c3218, #2c160c);
+  color: #fff0c9;
+  padding: 10px 14px;
+  font-weight: 900;
+}
+
+.orbe-wordmark span::before {
+  content: "*";
+}
+
+@media (max-width: 980px) {
+  .dnd-sheet {
+    width: calc(100vw - 32px);
+  }
+
+  .dnd-identity-grid,
+  .dnd-notes-grid,
+  .dnd-core-grid,
+  .dnd-rules-grid,
+  .dnd-magic-grid,
+  .dnd-derived-grid,
+  .dnd-ac-grid,
+  .dnd-hitdice-grid,
+  .dnd-death-grid,
+  .dnd-magic-stats {
+    grid-template-columns: 1fr;
   }
 }

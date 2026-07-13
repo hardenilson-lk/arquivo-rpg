@@ -25,9 +25,52 @@ let panState = null;
 let mapPlayerPreview = false;
 let diceClearTimer = null;
 let diceAudio = null;
+let lastSoundtrackTrackId = "";
+let lastSoundtrackCommandId = "";
 let masterInventorySheetId = null;
+let voiceChannel = null;
+let localVoiceStream = null;
+let voiceJoined = false;
+let voiceMuted = false;
+let voiceDeafened = false;
+let voiceMonitoring = false;
+let voiceMonitorAudio = null;
+let silentVoiceTrack = null;
+const voicePeers = new Map();
+const voiceParticipants = new Map();
 const LEGACY_STORAGE_KEY = "mesa-arcana";
 const SESSION_STORAGE_KEY = "arquivo-rpg-session";
+const DND_LAYOUT_STORAGE_KEY = "orbe-dnd-layout";
+
+const RPG_SYSTEMS = {
+  arquivo: {
+    id: "arquivo",
+    nome: "Arquivo",
+    abreviacao: "ARQ",
+    tema: "theme-arquivo",
+    ficha: "arquivo",
+    desc: "Misterio, investigacao e horrores que desafiam a razao.",
+    cardClass: "system-arquivo"
+  },
+  dnd5e: {
+    id: "dnd5e",
+    nome: "D&D 5e",
+    abreviacao: "DND",
+    tema: "theme-dnd",
+    ficha: "dnd5e",
+    desc: "A fantasia classica que inspira geracoes.",
+    cardClass: "system-dnd"
+  },
+  personalizado: {
+    id: "personalizado",
+    nome: "Sistema Proprio",
+    abreviacao: "CUSTOM",
+    tema: "theme-custom",
+    ficha: "generica",
+    desc: "Use suas proprias regras e crie algo unico.",
+    cardClass: "system-custom"
+  }
+};
 
 const els = {
   battlefield: document.querySelector("#battlefield"),
@@ -86,6 +129,22 @@ const els = {
   chatLog: document.querySelector("#chatLog"),
   chatForm: document.querySelector("#chatForm"),
   chatText: document.querySelector("#chatText"),
+  voiceStatus: document.querySelector("#voiceStatus"),
+  voiceJoin: document.querySelector("#voiceJoin"),
+  voiceMute: document.querySelector("#voiceMute"),
+  voiceDeafen: document.querySelector("#voiceDeafen"),
+  voiceAttention: document.querySelector("#voiceAttention"),
+  voiceRequestTalk: document.querySelector("#voiceRequestTalk"),
+  voiceMonitor: document.querySelector("#voiceMonitor"),
+  voiceMicLamp: document.querySelector("#voiceMicLamp"),
+  voiceParticipants: document.querySelector("#voiceParticipants"),
+  voiceRemoteAudio: document.querySelector("#voiceRemoteAudio"),
+  soundtrackForm: document.querySelector("#soundtrackForm"),
+  soundtrackUrl: document.querySelector("#soundtrackUrl"),
+  soundtrackVolume: document.querySelector("#soundtrackVolume"),
+  soundtrackVolumeValue: document.querySelector("#soundtrackVolumeValue"),
+  soundtrackPlayer: document.querySelector("#soundtrackPlayer"),
+  soundtrackList: document.querySelector("#soundtrackList"),
   syncStatus: document.querySelector("#syncStatus"),
   sidebarToggle: document.querySelector("#sidebarToggle"),
   rollResult: document.querySelector("#rollResult"),
@@ -398,6 +457,14 @@ function safeSetLocalStorage(key, value) {
   }
 }
 
+function dndLayoutSettings() {
+  const settings = readJsonStorage(DND_LAYOUT_STORAGE_KEY) || {};
+  return {
+    x: Number(settings.x) || 0,
+    y: Number(settings.y) || 0
+  };
+}
+
 function lightLocalState() {
   const user = currentUser();
   return {
@@ -504,15 +571,20 @@ function formatArquivoNumber(numero) {
   return `arquivo ${String(numero).padStart(4, "0")}`;
 }
 
-function createCampaignRecord(nome, mestreId) {
+function createCampaignRecord(nome, mestreId, systemId = "arquivo") {
   const id = crypto.randomUUID();
   const campaignName = nome || "Campanha sem nome";
+  const system = systemFor(systemId);
   const session = createSessionRecord(id, 1, "Arquivo inicial", "Arquivo aberto para a primeira sessao.", blankMap("Mapa inicial"));
   const inviteCode = `CAMP-${Math.floor(1000 + Math.random() * 9000)}`;
   return {
     id,
     nome: campaignName,
     mestreId,
+    sistemaRegra: system.id,
+    sistema_regra: system.id,
+    themeKey: system.tema,
+    theme_key: system.tema,
     jogadores: [],
     personagens: [],
     sessoes: [session],
@@ -540,6 +612,9 @@ function createSessionRecord(campaignId, numero, titulo, resumo = "", map = blan
     anotacoes: [],
     pistas: [],
     chat: [],
+    soundtracks: [],
+    soundtrackVolume: 70,
+    soundtrackCommand: null,
     logs: [],
     status: numero === 1 ? "ativa" : "pendente",
     visibleToPlayers: numero === 1,
@@ -643,6 +718,76 @@ function currentSession() {
   return campaign?.sessoes.find((session) => session.id === state.activeSessionId) || campaign?.sessoes[0] || null;
 }
 
+function normalizeSystemId(systemId) {
+  const clean = normalizeKey(systemId || "arquivo").replace(/[^a-z0-9]/g, "");
+  if (clean === "dnd" || clean === "dnd5" || clean === "dnd5e") return "dnd5e";
+  if (clean === "custom" || clean === "sistemaproprio" || clean === "personalizado") return "personalizado";
+  return RPG_SYSTEMS[clean] ? clean : "arquivo";
+}
+
+function systemFor(value) {
+  return RPG_SYSTEMS[normalizeSystemId(value)] || RPG_SYSTEMS.arquivo;
+}
+
+function activeCampaignSystemId() {
+  if (state.currentMode === "sheet") {
+    const activeSheet = state.sheets.find((sheet) => sheet.id === state.activeSheetId);
+    if (activeSheet) return sheetSystemId(activeSheet);
+  }
+  const campaign = currentCampaign();
+  return normalizeSystemId(campaign?.payload?.sistema_regra || campaign?.payload?.sistemaRegra || campaign?.sistemaRegra || campaign?.sistema_regra || campaign?.system || "arquivo");
+}
+
+function campaignSystemId(campaign = currentCampaign()) {
+  return normalizeSystemId(campaign?.payload?.sistema_regra || campaign?.payload?.sistemaRegra || campaign?.sistemaRegra || campaign?.sistema_regra || campaign?.system || "arquivo");
+}
+
+function sheetSystemId(sheet) {
+  return normalizeSystemId(sheet?.payload?.sistema_regra || sheet?.payload?.sistemaRegra || sheet?.sistemaRegra || sheet?.sistema_regra || sheet?.system || "arquivo");
+}
+
+function sheetMatchesCampaign(sheet, campaign = currentCampaign()) {
+  if (!sheet || !campaign) return true;
+  return sheetSystemId(sheet) === campaignSystemId(campaign);
+}
+
+function activeVisualSystemId() {
+  const activeSheet = state.sheets.find((sheet) => sheet.id === state.activeSheetId);
+  if ((state.currentMode === "sheet" || state.activeTab === "fichas") && activeSheet) {
+    return sheetSystemId(activeSheet);
+  }
+  return activeCampaignSystemId();
+}
+
+function compatibleSheetsForCampaign(campaign = currentCampaign(), sheets = state.sheets) {
+  const systemId = campaignSystemId(campaign);
+  return (sheets || []).map(normalizeSheet).filter((sheet) => sheetSystemId(sheet) === systemId);
+}
+
+function systemMismatchMessage(sheet, campaign = currentCampaign()) {
+  return `Essa ficha e de ${systemFor(sheetSystemId(sheet)).nome}, mas a campanha e de ${systemFor(campaignSystemId(campaign)).nome}. Use uma ficha do mesmo sistema.`;
+}
+
+function applyCampaignTheme() {
+  const systemId = activeVisualSystemId();
+  const isDnd = systemId === "dnd5e";
+  document.body.classList.toggle("theme-dnd5e", isDnd);
+  document.body.classList.toggle("theme-dnd", isDnd);
+  document.body.classList.toggle("campaign-dnd", isDnd);
+  document.body.dataset.campaignSystem = systemId;
+}
+
+function clearCampaignTheme() {
+  document.body.classList.remove("theme-dnd5e", "theme-dnd", "campaign-dnd");
+  delete document.body.dataset.campaignSystem;
+}
+
+function selectedSystemValue(selector, fallback = "") {
+  const field = document.querySelector(selector);
+  const value = field?.value || field?.dataset.selectedSystem || fallback || activeCampaignSystemId() || "arquivo";
+  return normalizeSystemId(value);
+}
+
 function createAccount(username, email, password, confirmPassword = password) {
   const cleanUser = username.trim();
   const cleanEmail = email.trim().toLowerCase();
@@ -690,11 +835,13 @@ let lastLocalGridChangeAt = 0;
 let lastAppliedGridUpdate = "";
 let gridRealtimeChannel = null;
 let sheetRealtimeChannel = null;
+let campaignRealtimeChannel = null;
 let activeRealtimeKey = "";
 const tokenSaveTimers = new Map();
 const sheetSaveTimers = new Map();
 const syncedGridTokenIds = new Set();
 let suppressOnlineSave = false;
+let backgroundLoadRunning = false;
 
 function supabaseClient() {
   return window.arquivosSupabase || null;
@@ -709,6 +856,11 @@ function setSyncStatus(message, isError = false) {
   if (els.syncStatus) {
     els.syncStatus.textContent = message;
     els.syncStatus.classList.toggle("sync-error", isError);
+  }
+  const portalStatus = document.querySelector("#portalLoadStatus");
+  if (portalStatus) {
+    portalStatus.textContent = message || "Pronto.";
+    portalStatus.classList.toggle("sync-error", isError);
   }
   const method = isError ? "warn" : "log";
   console[method](`[Supabase] ${message}`);
@@ -793,10 +945,15 @@ function upsertLocalAccount(account) {
 
 function normalizeCampaignRecord(campaign = {}) {
   const inviteCode = campaign.codigoConvite || campaign.codigo_convite || campaign.inviteCode || campaign.invite_code || `CAMP-${Math.floor(1000 + Math.random() * 9000)}`;
+  const system = systemFor(campaign.payload?.sistema_regra || campaign.payload?.sistemaRegra || campaign.sistemaRegra || campaign.sistema_regra || campaign.system || "arquivo");
   const safe = {
     id: campaign.id || crypto.randomUUID(),
     nome: campaign.nome || campaign.name || "Campanha sem nome",
     mestreId: campaign.mestreId || campaign.owner_id || campaign.ownerId || "",
+    sistemaRegra: system.id,
+    sistema_regra: system.id,
+    themeKey: campaign.themeKey || campaign.theme_key || system.tema,
+    theme_key: campaign.theme_key || campaign.themeKey || system.tema,
     jogadores: Array.isArray(campaign.jogadores) ? campaign.jogadores : [],
     personagens: Array.isArray(campaign.personagens) ? campaign.personagens : [],
     sessoes: Array.isArray(campaign.sessoes) && campaign.sessoes.length ? campaign.sessoes : [createSessionRecord(campaign.id || crypto.randomUUID(), 1, "Arquivo inicial", "Arquivo aberto para a primeira sessao.", blankMap("Mapa inicial"))],
@@ -814,6 +971,9 @@ function normalizeCampaignRecord(campaign = {}) {
     anotacoes: Array.isArray(session.anotacoes) ? session.anotacoes : [],
     pistas: Array.isArray(session.pistas) ? session.pistas : [],
     chat: Array.isArray(session.chat) ? session.chat : [],
+    soundtracks: Array.isArray(session.soundtracks) ? session.soundtracks : [],
+    soundtrackVolume: clamp(Number(session.soundtrackVolume ?? 70), 0, 100),
+    soundtrackCommand: session.soundtrackCommand || null,
     logs: Array.isArray(session.logs) ? session.logs : []
   }));
   return safe;
@@ -881,24 +1041,27 @@ async function createAccountOnline(username, email, password, confirmPassword = 
 async function loginAccountOnline(username, password) {
   const identifier = username.trim();
   const client = supabaseClient();
-    console.log("Iniciando login", { identifier });
-  if (!client) throw new Error("Supabase nao carregou. Verifique sua conexao e recarregue a pagina.");
-  if (!identifier || !password) throw new Error("Informe usuario/email e senha.");
+  console.time("login_total");
+  console.log("Iniciando login", { identifier });
   try {
-    console.log("Buscando usuário", { identifier });
+    if (!client) throw new Error("Supabase nao carregou. Verifique sua conexao e recarregue a pagina.");
+    if (!identifier || !password) throw new Error("Informe usuario/email e senha.");
+    console.log("Buscando usuario", { identifier });
     setSyncStatus("Entrando pelo Supabase...");
-    const { data, error } = await client.from("usuarios").select("*");
+    console.time("buscar_usuario");
+    const { data, error } = await client
+      .from("usuarios")
+      .select("*")
+      .or(`username.ilike.${identifier},email.ilike.${identifier}`)
+      .limit(1);
+    console.timeEnd("buscar_usuario");
     if (error) {
       console.error("[Supabase] Erro Supabase", { table: "usuarios", error });
       throw new Error(`usuarios: ${remoteErrorMessage(error)}`);
     }
-    const users = Array.isArray(data) ? data : [];
-    const userRow = users.find((row) =>
-      row.username?.toLowerCase() === identifier.toLowerCase() ||
-      row.email?.toLowerCase() === identifier.toLowerCase()
-    );
+    const userRow = Array.isArray(data) ? data[0] : null;
     if (!userRow) throw new Error("Usuario nao encontrado no Supabase.");
-    console.log("Usuário encontrado", { id: userRow.id, username: userRow.username, role: userRow.role || userRow.payload?.role });
+    console.log("Usuario encontrado", { id: userRow.id, username: userRow.username, role: userRow.role || userRow.payload?.role });
     const accountData = userFromRow(userRow);
     if (!isUuid(accountData.id)) {
       console.error("[Supabase] Erro Supabase", { table: "usuarios", motivo: "usuario.id nao e UUID", userRow, accountData });
@@ -915,22 +1078,17 @@ async function loginAccountOnline(username, password) {
     console.log("[Supabase] Usuario carregado do Supabase", account);
     console.log("[Supabase] currentUser.id", account.id);
     console.log("[Supabase] currentUser.role", normalizeRole(account.role));
-    try {
-      await migrateLocalWorkspaceToSupabase(account);
-      await loadOnlineWorkspace();
-      setSyncStatus("Dados online carregados.");
-    } catch (workspaceError) {
-      console.error("[Supabase] Erro Supabase", { etapa: "carregar workspace apos login", error: workspaceError });
-      setSyncStatus(`Login feito, mas nao consegui carregar tudo: ${workspaceError.message}`, true);
-    }
+    saveLightSession();
+    setSyncStatus("Login confirmado. Carregando dados...");
     return account;
   } catch (error) {
     console.error("Erro no login", error);
     setSyncStatus(`Erro no login: ${error.message}`, true);
     throw error;
+  } finally {
+    console.timeEnd("login_total");
   }
 }
-
 async function saveOnlineUser(user = currentUser()) {
   const client = supabaseClient();
   if (!client || !isOnlineUser(user)) return;
@@ -974,6 +1132,8 @@ async function loadOnlineWorkspace() {
     console.log("[Supabase] currentUser.role", normalizeRole(user.role));
     console.log("[Supabase] Carregando campanhas para user_id", user.id);
     setSyncStatus("Carregando arquivos online...");
+    console.time("carregar_campanhas");
+    console.time("carregar_personagens");
     const [
       ownedCampaignResult,
       sheetResult,
@@ -987,6 +1147,8 @@ async function loadOnlineWorkspace() {
       client.from("anotacoes").select("*").eq("user_id", user.id),
       client.from("rolagens").select("*").eq("user_id", user.id)
     ]);
+    console.timeEnd("carregar_personagens");
+    console.timeEnd("carregar_campanhas");
 
     [
       ["campanhas", ownedCampaignResult],
@@ -1085,6 +1247,13 @@ function markGridChanged(token = null, mode = "move") {
   saveLightSession();
   const changedToken = token || state.tokens.find((item) => item.id === state.selectedToken);
   if (changedToken) queueGridTokenSave(changedToken, mode, mode === "move" ? 180 : 250);
+}
+
+function markMapStructureChanged() {
+  lastLocalGridChangeAt = Date.now();
+  syncCurrentSession();
+  saveLightSession();
+  queueOnlineSave(250);
 }
 
 function userCampaignsForSave(user) {
@@ -1316,10 +1485,51 @@ async function migrateLocalWorkspaceToSupabase(user = currentUser()) {
 }
 
 function listItemsFromText(text) {
-  return String(text || "")
-    .split(/\n|,/)
-    .map((item) => item.trim())
-    .filter(Boolean);
+  return splitLines(text);
+}
+
+function inventoryRowsForSheet(sheet, user, now, rich = true) {
+  return listItemsFromText(sheet.inventory).map((line) => {
+    const item = parseInventoryItem(line, sheet);
+    const stats = item.stats || {};
+    const base = {
+      user_id: user.id,
+      personagem_id: sheet.id,
+      campanha_id: uuidOrNull(state.campaigns.find((campaign) => (campaign.personagens || []).includes(sheet.id))?.id),
+      nome: item.name,
+      payload: {
+        name: item.name,
+        inventoryText: sheet.inventory,
+        line,
+        stats,
+        system: sheetSystemId(sheet),
+        savedAt: now
+      },
+      updated_at: now
+    };
+    if (!rich || sheetSystemId(sheet) !== "dnd5e") return base;
+    return {
+      ...base,
+      categoria: dndInventoryCategory(item),
+      subtipo: stats.subtype || stats.category || item.entry?.type || "",
+      quantidade: Number(stats.quantity) || 1,
+      peso: stats.weight || "",
+      equipado: !!stats.equipped,
+      arma_em_punho: !!stats.weaponReady,
+      armadura_em_uso: !!stats.armorInUse,
+      escudo_em_uso: !!stats.shieldInUse,
+      dano: stats.damage || "",
+      tipo_dano: stats.damageType || "",
+      propriedades: stats.properties || "",
+      dominio: stats.mastery || "",
+      alcance: stats.range || "",
+      bonus_ataque: Number(stats.attackBonus || 0) || 0,
+      bonus_dano: Number(stats.damageBonus || 0) || 0,
+      bonus_ca: Number(stats.bonusCa || stats.shieldBonus || 0) || 0,
+      ca_base: Number(stats.armorBase || 0) || null,
+      observacoes: item.customDescription || stats.notes || item.entry?.desc || ""
+    };
+  });
 }
 
 async function saveOnlineState() {
@@ -1350,16 +1560,17 @@ async function saveOnlineState() {
 
     for (const sheet of userSheetsForSave(user)) {
       await client.from("inventario").delete().eq("personagem_id", sheet.id).eq("user_id", user.id);
-      const items = listItemsFromText(sheet.inventory);
-      if (items.length) {
-        const { error } = await client.from("inventario").insert(items.map((name) => ({
-          user_id: user.id,
-          personagem_id: sheet.id,
-          nome: name,
-          payload: { name, inventoryText: sheet.inventory, stats: catalogStats[name] || null, savedAt: now },
-          updated_at: now
-        })));
-        if (error) throw new Error(`inventario: ${remoteErrorMessage(error)}`);
+      const inventoryRows = inventoryRowsForSheet(sheet, user, now, true);
+      if (inventoryRows.length) {
+        let insertResult = await client.from("inventario").insert(inventoryRows);
+        if (insertResult.error && sheetSystemId(sheet) === "dnd5e") {
+          console.warn("[Supabase] Erro ao salvar item com colunas D&D. Tentando fallback em payload.", insertResult.error);
+          insertResult = await client.from("inventario").insert(inventoryRowsForSheet(sheet, user, now, false));
+        }
+        if (insertResult.error) {
+          console.error("[Supabase] Erro ao salvar item", insertResult.error);
+          throw new Error(`inventario: ${remoteErrorMessage(insertResult.error)}`);
+        }
       }
       await client.from("anotacoes").delete().eq("personagem_id", sheet.id).eq("user_id", user.id);
       if (sheet.notes || sheet.appearance || sheet.personality || sheet.history || sheet.objective) {
@@ -1436,10 +1647,11 @@ async function deleteOnlineCampaign(campaignId) {
   console.log("[Supabase] Campanha apagada online:", campaignId);
 }
 
-function createCampaignForCurrentUser(name) {
+function createCampaignForCurrentUser(name, systemId = "arquivo") {
   const user = currentUser();
   if (!user) throw new Error("Faca login primeiro.");
-  const campaign = createCampaignRecord(name || "Nova campanha", user.id);
+  console.log("Criando campanha no Supabase", { nome: name, sistema_regra: normalizeSystemId(systemId) });
+  const campaign = createCampaignRecord(name || "Nova campanha", user.id, systemId);
   state.campaigns.push(campaign);
   user.role = user.role === "admin" ? "admin" : "master";
   user.campaignIds = Array.from(new Set([...(user.campaignIds || []), campaign.id]));
@@ -1451,12 +1663,28 @@ function createCampaignForCurrentUser(name) {
   return campaign;
 }
 
-function createSheetForCurrentUser(name) {
+function blankSheetForSystem(systemId = "arquivo", name = "", player = "") {
+  const system = systemFor(systemId);
+  if (system.id === "dnd5e") {
+    return normalizeSheet(blankDndSheet(name || "Novo aventureiro", player || "Jogador"));
+  }
+  return normalizeSheet({
+    ...blankSheet(name || "Novo agente", player || "Jogador"),
+    sistemaRegra: system.id,
+    sistema_regra: system.id,
+    fichaTipo: system.ficha
+  });
+}
+
+function createSheetForCurrentUser(name, systemId = "arquivo") {
   const user = currentUser();
   if (!user) throw new Error("Faca login primeiro.");
   user.sheetIds = user.sheetIds || [];
   if (user.sheetIds.length >= 5) throw new Error("Limite de 5 fichas por conta atingido.");
-  const sheet = normalizeSheet(blankSheet(name || `Agente ${user.sheetIds.length + 1}`, user.username));
+  const system = systemFor(systemId);
+  console.log("Criando ficha no Supabase", { nome: name, sistema_regra: system.id });
+  const defaultName = system.id === "dnd5e" ? `Aventureiro ${user.sheetIds.length + 1}` : `Agente ${user.sheetIds.length + 1}`;
+  const sheet = blankSheetForSystem(system.id, name || defaultName, user.username);
   state.sheets.unshift(sheet);
   user.sheetIds.push(sheet.id);
   state.activeSheetId = sheet.id;
@@ -1635,6 +1863,7 @@ function renderGridSyncUpdate() {
   renderTokenList();
   renderMasterShield();
   renderNpcMiniCards();
+  renderSoundtracks();
   window.archiveUI?.render(state);
 }
 
@@ -1752,27 +1981,32 @@ async function loadGridTokensFromSupabase({ seedIfEmpty = true } = {}) {
   const campaign = currentCampaign();
   const campaignId = uuidOrNull(campaign?.id);
   if (!client || !campaignId) return;
+  console.time("carregar_grid");
   const sceneId = currentSceneId();
-  const { data, error } = await client
-    .from("grid_tokens")
-    .select("*")
-    .eq("campanha_id", campaignId)
-    .eq("cena_id", sceneId);
-  if (error) {
-    console.error("[Supabase] Erro Supabase", { table: "grid_tokens", error });
-    return;
+  try {
+    const { data, error } = await client
+      .from("grid_tokens")
+      .select("*")
+      .eq("campanha_id", campaignId)
+      .eq("cena_id", sceneId);
+    if (error) {
+      console.error("[Supabase] Erro Supabase", { table: "grid_tokens", error });
+      return;
+    }
+    if (Array.isArray(data) && data.length) {
+      syncedGridTokenIds.clear();
+      data.forEach((row) => {
+        if (row.id) syncedGridTokenIds.add(row.id);
+      });
+      state.tokens = data.map(tokenFromGridRow);
+      syncCurrentSession();
+      renderGridSyncUpdate();
+      return;
+    }
+    if (seedIfEmpty && state.tokens.length) await upsertGridTokens(state.tokens, "full");
+  } finally {
+    console.timeEnd("carregar_grid");
   }
-  if (Array.isArray(data) && data.length) {
-    syncedGridTokenIds.clear();
-    data.forEach((row) => {
-      if (row.id) syncedGridTokenIds.add(row.id);
-    });
-    state.tokens = data.map(tokenFromGridRow);
-    syncCurrentSession();
-    renderGridSyncUpdate();
-    return;
-  }
-  if (seedIfEmpty && state.tokens.length) await upsertGridTokens(state.tokens, "full");
 }
 
 async function upsertGridTokens(tokens, mode = "full") {
@@ -1828,6 +2062,7 @@ function startRealtimeSync(mode = state.currentMode) {
   if (activeRealtimeKey === key && gridRealtimeChannel && sheetRealtimeChannel) return;
   stopRealtimeSync();
   activeRealtimeKey = key;
+  console.time("iniciar_realtime");
   loadGridTokensFromSupabase().catch((error) => console.error("[Supabase] Erro Supabase", error));
   gridRealtimeChannel = client
     .channel(`grid_tokens:${campaignId}:${sceneId}`)
@@ -1843,7 +2078,10 @@ function startRealtimeSync(mode = state.currentMode) {
     })
     .subscribe((status, error) => {
       if (error) console.error("Erro Realtime", error);
-      if (status === "SUBSCRIBED") console.log("Realtime conectado ao grid");
+      if (status === "SUBSCRIBED") {
+        console.log("Realtime conectado ao grid");
+        console.timeEnd("iniciar_realtime");
+      }
     });
   sheetRealtimeChannel = client
     .channel(`personagens:${campaignId}`)
@@ -1858,14 +2096,32 @@ function startRealtimeSync(mode = state.currentMode) {
     .subscribe((status, error) => {
       if (error) console.error("Erro Realtime", error);
     });
+  campaignRealtimeChannel = client
+    .channel(`campanhas:${campaignId}`)
+    .on("postgres_changes", { event: "UPDATE", schema: "public", table: "campanhas", filter: `id=eq.${campaignId}` }, (payload) => {
+      try {
+        if (Date.now() - lastLocalGridChangeAt < 500) return;
+        if (applyRemoteGridCampaign(payload.new)) {
+          renderGridSyncUpdate();
+          console.log("Mapa recebido", { campanha_id: campaignId, cena_id: sceneId });
+        }
+      } catch (error) {
+        console.error("Erro Realtime", error);
+      }
+    })
+    .subscribe((status, error) => {
+      if (error) console.error("Erro Realtime", error);
+    });
 }
 
 function stopRealtimeSync() {
   const client = supabaseClient();
   if (client && gridRealtimeChannel) client.removeChannel(gridRealtimeChannel);
   if (client && sheetRealtimeChannel) client.removeChannel(sheetRealtimeChannel);
+  if (client && campaignRealtimeChannel) client.removeChannel(campaignRealtimeChannel);
   gridRealtimeChannel = null;
   sheetRealtimeChannel = null;
+  campaignRealtimeChannel = null;
   activeRealtimeKey = "";
   syncedGridTokenIds.clear();
 }
@@ -1879,6 +2135,7 @@ function applyRemoteSheetRow(row) {
   if (state.activeSheetId === remote.id) {
     renderCrisisSheet();
     renderInventoryView();
+    renderRitualsView();
     renderNotesView();
   }
   syncSheetToken(remote);
@@ -2008,16 +2265,22 @@ async function joinCampaignWithInvite(code) {
 }
 
 function linkActiveSheetToCampaign(campaign) {
-  const sheet = activeUserSheet() || createSheetForCurrentUser(`${currentUser()?.username || "Novo"} agente`);
   if (!campaign) throw new Error("Campanha nao encontrada.");
+  const system = systemFor(campaignSystemId(campaign));
+  const defaultName = system.id === "dnd5e" ? `${currentUser()?.username || "Novo"} aventureiro` : `${currentUser()?.username || "Novo"} agente`;
+  const sheet = activeUserSheet(campaign) || createSheetForCurrentUser(defaultName, system.id);
   if (!sheet?.id) throw new Error("Crie ou selecione uma ficha antes de vincular.");
-  addActiveSheetToCampaign(campaign);
+  addActiveSheetToCampaign(campaign, { strict: true });
   seedSessionTokensFromSheets(campaign, currentSession());
 }
 
-function addActiveSheetToCampaign(campaign) {
-  const sheet = activeUserSheet();
+function addActiveSheetToCampaign(campaign, options = {}) {
+  const sheet = activeUserSheet(campaign);
   if (!campaign || !sheet?.id) return false;
+  if (!sheetMatchesCampaign(sheet, campaign)) {
+    if (options.strict) throw new Error(systemMismatchMessage(sheet, campaign));
+    return false;
+  }
   campaign.personagens = Array.from(new Set([...(campaign.personagens || []), sheet.id]));
   return true;
 }
@@ -2026,7 +2289,8 @@ function sheetsLinkedToCampaign(campaign) {
   return (campaign?.personagens || [])
     .map((id) => state.sheets.find((sheet) => sheet.id === id))
     .filter(Boolean)
-    .map(normalizeSheet);
+    .map(normalizeSheet)
+    .filter((sheet) => sheetMatchesCampaign(sheet, campaign));
 }
 
 function tokenFromSheet(sheet, index = 0) {
@@ -2178,6 +2442,89 @@ function blankSheet(name = "Novo agente", player = "Local") {
   };
 }
 
+function blankDndSheet(name = "Novo aventureiro", player = "Local") {
+  return normalizeSheet({
+    ...blankSheet(name, player),
+    sistemaRegra: "dnd5e",
+    sistema_regra: "dnd5e",
+    fichaTipo: "dnd5e",
+    role: "Humano",
+    className: "",
+    pathName: "",
+    nex: "1",
+    rank: "Nivel 1",
+    movement: 9,
+    hp: 10,
+    hpMax: 10,
+    pe: 0,
+    peMax: 0,
+    san: 0,
+    sanMax: 0,
+    defense: 10,
+    str: 2,
+    agi: 2,
+    vig: 2,
+    int: 2,
+    pre: 2,
+    skills: "",
+    inventory: "",
+    rituals: "",
+    notes: "",
+    dnd: {
+      classe: "",
+      raca: "Humano",
+      antecedente: "",
+      alinhamento: "",
+      experiencia: 0,
+      nivel: 1,
+      forca: 10,
+      destreza: 10,
+      constituicao: 10,
+      inteligencia: 10,
+      sabedoria: 10,
+      carisma: 10,
+      pv: 10,
+      pvMax: 10,
+      pvTemporario: 0,
+      ca: 10,
+      armorBase: 10,
+      dexLimit: "",
+      shieldBonus: 0,
+      acBonus: 0,
+      initiativeBonus: 0,
+      deslocamento: 9,
+      hitDie: 8,
+      hitDiceUsed: 0,
+      deathSuccess: 0,
+      deathFailure: 0,
+      inspiration: false,
+      proficientSaves: {},
+      proficientSkills: {},
+      expertiseSkills: {},
+      skillBonus: {},
+      saveBonus: {},
+      proficiencias: "",
+      equipamentos: "",
+      magias: "",
+      anotacoes: "",
+      ataques: "",
+      tracos: "",
+      idiomas: "",
+      personalidade: "",
+      ideais: "",
+      vinculos: "",
+      defeitos: "",
+      tesouro: "",
+      spellcastingAbility: "carisma",
+      spellSaveDcBonus: 0,
+      spellAttackBonusExtra: 0,
+      spellSlots: {},
+      spellSlotsUsed: {},
+      magiasPreparadas: ""
+    }
+  });
+}
+
 function save() {
   syncCurrentSession();
   saveLightSession();
@@ -2203,17 +2550,24 @@ function syncCurrentSession() {
 }
 
 function renderAll() {
+  applyCampaignTheme();
   renderControls();
+  syncSystemTabs();
   renderGrid();
   renderTokenList();
   renderMasterShield();
   renderNpcMiniCards();
   renderMissionsView();
   renderChatView();
+  renderVoicePanel();
+  renderSoundtracks();
+  renderSoundtrackLibrary();
   renderCrisisSheet();
+  applyCampaignTheme();
   renderSheets();
   renderRollLog();
   renderInventoryView();
+  renderRitualsView();
   renderNotesView();
   renderCampaignFiles();
   window.archiveUI?.render(state);
@@ -2629,6 +2983,7 @@ function toggleDoorEdge(edgeId) {
   if (!edge || edge.type !== "door") return;
   edge.state = edge.state === "open" ? "closed" : "open";
   renderAll();
+  markMapStructureChanged();
 }
 
 function toggleNearestDoor(x, y) {
@@ -2643,6 +2998,7 @@ function toggleNearestDoor(x, y) {
   if (!best || best.distance > 0.85) return false;
   best.edge.state = best.edge.state === "open" ? "closed" : "open";
   renderAll();
+  markMapStructureChanged();
   return true;
 }
 
@@ -2761,6 +3117,7 @@ function handleMapCellClick(x, y) {
     }
     upsertMapEdge(pendingMapEdgeStart, point, tool);
     pendingMapEdgeStart = null;
+    markMapStructureChanged();
   }
   if (tool === "door") {
     // handled by edge workflow above
@@ -2769,6 +3126,7 @@ function handleMapCellClick(x, y) {
     removeNearestMapEdge(x, y);
     removeMapMark(x, y);
     hideFogAt(x, y, 0);
+    markMapStructureChanged();
   }
   renderAll();
 }
@@ -3106,9 +3464,890 @@ function renderMasterSheetNavigator(activeSheet) {
   `;
 }
 
+function dndValue(sheet, field, fallback = "") {
+  return sheet.dnd?.[field] ?? fallback;
+}
+
+const DND_ABILITIES = [
+  ["forca", "FOR", "Forca"],
+  ["destreza", "DES", "Destreza"],
+  ["constituicao", "CON", "Constituicao"],
+  ["inteligencia", "INT", "Inteligencia"],
+  ["sabedoria", "SAB", "Sabedoria"],
+  ["carisma", "CAR", "Carisma"]
+];
+
+const DND_SKILLS = [
+  ["acrobacia", "Acrobacia", "destreza"],
+  ["adestrarAnimais", "Adestrar Animais", "sabedoria"],
+  ["arcanismo", "Arcanismo", "inteligencia"],
+  ["atletismo", "Atletismo", "forca"],
+  ["atuacao", "Atuacao", "carisma"],
+  ["enganacao", "Enganacao", "carisma"],
+  ["furtividade", "Furtividade", "destreza"],
+  ["historia", "Historia", "inteligencia"],
+  ["intimidacao", "Intimidacao", "carisma"],
+  ["intuicao", "Intuicao", "sabedoria"],
+  ["investigacao", "Investigacao", "inteligencia"],
+  ["lidarComAnimais", "Lidar com Animais", "sabedoria"],
+  ["medicina", "Medicina", "sabedoria"],
+  ["natureza", "Natureza", "inteligencia"],
+  ["percepcao", "Percepcao", "sabedoria"],
+  ["persuasao", "Persuasao", "carisma"],
+  ["prestidigitacao", "Prestidigitacao", "destreza"],
+  ["religiao", "Religiao", "inteligencia"],
+  ["sobrevivencia", "Sobrevivencia", "sabedoria"]
+];
+
+const DND_CLASSES = [
+  ["", "Escolha a classe"],
+  ["Barbaro", "Barbaro"],
+  ["Bardo", "Bardo"],
+  ["Bruxo", "Bruxo"],
+  ["Clerigo", "Clerigo"],
+  ["Druida", "Druida"],
+  ["Feiticeiro", "Feiticeiro"],
+  ["Guerreiro", "Guerreiro"],
+  ["Ladino", "Ladino"],
+  ["Mago", "Mago"],
+  ["Monge", "Monge"],
+  ["Paladino", "Paladino"],
+  ["Patrulheiro", "Patrulheiro"]
+];
+
+const DND_RACES = ["Humano", "Anao", "Elfo", "Halfling", "Draconato", "Gnomo", "Meio-elfo", "Meio-orc", "Tiefling"];
+const DND_BACKGROUNDS = ["Acolito", "Artesao de Guilda", "Artista", "Charlatao", "Criminoso", "Eremita", "Forasteiro", "Marinheiro", "Nobre", "Orfao", "Sabio", "Soldado"];
+
+const DND_EQUIPMENT_CATALOG = [
+  { name: "Adaga", type: "Arma simples corpo a corpo", category: "Arma", cost: "2 po", weight: "0,5 kg", damage: "1d4 perfurante", range: "1,5m / arremesso 6/18m", properties: "Acuidade, leve, arremesso", desc: "Lamina pequena e discreta. Pode usar Forca ou Destreza no ataque por ter acuidade." },
+  { name: "Bordao", type: "Arma simples corpo a corpo", category: "Arma", cost: "2 pp", weight: "2 kg", damage: "1d6 contundente", range: "1,5m", properties: "Versatil 1d8", desc: "Bastao reforcado, util como arma e apoio de viagem." },
+  { name: "Clava", type: "Arma simples corpo a corpo", category: "Arma", cost: "1 pp", weight: "1 kg", damage: "1d4 contundente", range: "1,5m", properties: "Leve", desc: "Arma simples de impacto, facil de improvisar." },
+  { name: "Lanca", type: "Arma simples corpo a corpo", category: "Arma", cost: "1 po", weight: "1,5 kg", damage: "1d6 perfurante", range: "1,5m / arremesso 6/18m", properties: "Arremesso, versatil 1d8", desc: "Arma longa simples para manter distancia ou arremessar." },
+  { name: "Maca", type: "Arma simples corpo a corpo", category: "Arma", cost: "5 po", weight: "2 kg", damage: "1d6 contundente", range: "1,5m", properties: "-", desc: "Arma de impacto usada por viajantes, guardas e sacerdotes." },
+  { name: "Machado de mao", type: "Arma simples corpo a corpo", category: "Arma", cost: "5 po", weight: "1 kg", damage: "1d6 cortante", range: "1,5m / arremesso 6/18m", properties: "Leve, arremesso", desc: "Machado pequeno para combate proximo ou arremesso." },
+  { name: "Martelo leve", type: "Arma simples corpo a corpo", category: "Arma", cost: "2 po", weight: "1 kg", damage: "1d4 contundente", range: "1,5m / arremesso 6/18m", properties: "Leve, arremesso", desc: "Ferramenta pesada o bastante para virar arma em combate." },
+  { name: "Arco curto", type: "Arma simples a distancia", category: "Arma", cost: "25 po", weight: "1 kg", damage: "1d6 perfurante", range: "24/96m", properties: "Duas maos, municao", desc: "Arco leve para ataques a distancia usando Destreza." },
+  { name: "Besta leve", type: "Arma simples a distancia", category: "Arma", cost: "25 po", weight: "2,5 kg", damage: "1d8 perfurante", range: "24/96m", properties: "Municao, recarga, duas maos", desc: "Besta comum, forte e facil de mirar, mas lenta para recarregar." },
+  { name: "Dardo", type: "Arma simples a distancia", category: "Arma", cost: "5 pc", weight: "0,1 kg", damage: "1d4 perfurante", range: "6/18m", properties: "Acuidade, arremesso", desc: "Projetil leve de arremesso, bom para personagens ageis." },
+  { name: "Funda", type: "Arma simples a distancia", category: "Arma", cost: "1 pp", weight: "0 kg", damage: "1d4 contundente", range: "9/36m", properties: "Municao", desc: "Arma simples e barata que usa pedras ou balas de funda." },
+  { name: "Espada curta", type: "Arma marcial corpo a corpo", category: "Arma", cost: "10 po", weight: "1 kg", damage: "1d6 perfurante", range: "1,5m", properties: "Acuidade, leve", desc: "Lamina agil, boa para combate com duas armas ou personagens de Destreza." },
+  { name: "Espada longa", type: "Arma marcial corpo a corpo", category: "Arma", cost: "15 po", weight: "1,5 kg", damage: "1d8 cortante", range: "1,5m", properties: "Versatil 1d10", desc: "Espada equilibrada, funciona com uma ou duas maos." },
+  { name: "Espada grande", type: "Arma marcial corpo a corpo", category: "Arma", cost: "50 po", weight: "3 kg", damage: "2d6 cortante", range: "1,5m", properties: "Pesada, duas maos", desc: "Arma pesada de alto dano, exige as duas maos." },
+  { name: "Machado grande", type: "Arma marcial corpo a corpo", category: "Arma", cost: "30 po", weight: "3,5 kg", damage: "1d12 cortante", range: "1,5m", properties: "Pesada, duas maos", desc: "Machado enorme para ataques brutais." },
+  { name: "Rapieira", type: "Arma marcial corpo a corpo", category: "Arma", cost: "25 po", weight: "1 kg", damage: "1d8 perfurante", range: "1,5m", properties: "Acuidade", desc: "Lamina precisa, excelente para combatentes focados em Destreza." },
+  { name: "Cimitarra", type: "Arma marcial corpo a corpo", category: "Arma", cost: "25 po", weight: "1,5 kg", damage: "1d6 cortante", range: "1,5m", properties: "Acuidade, leve", desc: "Lamina curva rapida, boa para estilo agil." },
+  { name: "Martelo de guerra", type: "Arma marcial corpo a corpo", category: "Arma", cost: "15 po", weight: "1 kg", damage: "1d8 contundente", range: "1,5m", properties: "Versatil 1d10", desc: "Martelo robusto contra armaduras e criaturas resistentes." },
+  { name: "Arco longo", type: "Arma marcial a distancia", category: "Arma", cost: "50 po", weight: "1 kg", damage: "1d8 perfurante", range: "45/180m", properties: "Pesada, duas maos, municao", desc: "Arco de longo alcance para combate a distancia." },
+  { name: "Besta pesada", type: "Arma marcial a distancia", category: "Arma", cost: "50 po", weight: "9 kg", damage: "1d10 perfurante", range: "30/120m", properties: "Pesada, municao, recarga, duas maos", desc: "Besta potente, excelente alcance e dano, mas pesada e lenta." },
+  { name: "Armadura acolchoada", type: "Armadura leve", category: "Armadura", cost: "5 po", weight: "4 kg", armorBase: 11, dexLimit: "", stealth: "Desvantagem", desc: "Armadura leve barata. CA 11 + DES, mas atrapalha Furtividade." },
+  { name: "Armadura de couro", type: "Armadura leve", category: "Armadura", cost: "10 po", weight: "5 kg", armorBase: 11, dexLimit: "", desc: "Protecao leve comum. CA 11 + modificador de DES." },
+  { name: "Couro batido", type: "Armadura leve", category: "Armadura", cost: "45 po", weight: "6,5 kg", armorBase: 12, dexLimit: "", desc: "Armadura leve reforcada. CA 12 + modificador de DES." },
+  { name: "Camisao de malha", type: "Armadura media", category: "Armadura", cost: "50 po", weight: "10 kg", armorBase: 13, dexLimit: 2, desc: "Armadura media. CA 13 + DES maximo +2." },
+  { name: "Brunea", type: "Armadura media", category: "Armadura", cost: "50 po", weight: "22,5 kg", armorBase: 14, dexLimit: 2, stealth: "Desvantagem", desc: "Armadura media pesada. CA 14 + DES maximo +2 e desvantagem em Furtividade." },
+  { name: "Peitoral", type: "Armadura media", category: "Armadura", cost: "400 po", weight: "10 kg", armorBase: 14, dexLimit: 2, desc: "Boa protecao media sem penalizar Furtividade. CA 14 + DES maximo +2." },
+  { name: "Meia armadura", type: "Armadura media", category: "Armadura", cost: "750 po", weight: "20 kg", armorBase: 15, dexLimit: 2, stealth: "Desvantagem", desc: "Armadura media forte. CA 15 + DES maximo +2 e desvantagem em Furtividade." },
+  { name: "Cota de aneis", type: "Armadura pesada", category: "Armadura", cost: "30 po", weight: "20 kg", armorBase: 14, dexLimit: 0, stealth: "Desvantagem", desc: "Armadura pesada simples. CA 14, sem bonus de DES." },
+  { name: "Cota de malha", type: "Armadura pesada", category: "Armadura", cost: "75 po", weight: "27,5 kg", armorBase: 16, dexLimit: 0, strength: 13, stealth: "Desvantagem", desc: "Armadura pesada. CA 16, exige Forca 13 para usar bem." },
+  { name: "Cota de talas", type: "Armadura pesada", category: "Armadura", cost: "200 po", weight: "30 kg", armorBase: 17, dexLimit: 0, strength: 15, stealth: "Desvantagem", desc: "Armadura pesada reforcada. CA 17, exige Forca 15." },
+  { name: "Armadura de placas", type: "Armadura pesada", category: "Armadura", cost: "1500 po", weight: "32,5 kg", armorBase: 18, dexLimit: 0, strength: 15, stealth: "Desvantagem", desc: "Melhor armadura comum. CA 18, exige Forca 15 e penaliza Furtividade." },
+  { name: "Escudo", type: "Escudo", category: "Escudo", cost: "10 po", weight: "3 kg", shieldBonus: 2, bonus: "+2 CA", desc: "Escudo empunhado concede +2 na Classe de Armadura enquanto estiver ativo." },
+  { name: "Mochila", type: "Equipamento de aventura", category: "Equipamento", cost: "2 po", weight: "2,5 kg", desc: "Bolsa de viagem para carregar itens essenciais." },
+  { name: "Corda de canhamo", type: "Equipamento de aventura", category: "Equipamento", cost: "1 po", weight: "5 kg", desc: "Corda comum de 15 metros para escalada, amarras e improvisos." },
+  { name: "Tocha", type: "Equipamento de aventura", category: "Equipamento", cost: "1 pc", weight: "0,5 kg", bonus: "Luz", desc: "Fonte de luz simples para exploracao." },
+  { name: "Racoes de viagem", type: "Equipamento de aventura", category: "Equipamento", cost: "5 pp", weight: "1 kg", desc: "Alimento seco para um dia de viagem." },
+  { name: "Cantil", type: "Equipamento de aventura", category: "Equipamento", cost: "2 pp", weight: "2,5 kg cheio", desc: "Recipiente para agua durante viagens." },
+  { name: "Pe de cabra", type: "Equipamento de aventura", category: "Equipamento", cost: "2 po", weight: "2,5 kg", bonus: "Ajuda a forcar objetos", desc: "Ferramenta para abrir, alavancar ou remover obstaculos." },
+  { name: "Ferramentas de ladrao", type: "Ferramenta", category: "Ferramenta", cost: "25 po", weight: "0,5 kg", bonus: "Testes de fechaduras e armadilhas com proficiencia adequada", desc: "Conjunto de gazuas e ferramentas pequenas para fechaduras e armadilhas." },
+  { name: "Kit de curandeiro", type: "Equipamento de aventura", category: "Equipamento", cost: "5 po", weight: "1,5 kg", bonus: "Estabilizar criatura", desc: "Kit com bandagens e suprimentos basicos para estabilizar feridos." },
+  { name: "Foco arcano", type: "Foco de conjuracao", category: "Foco", cost: "10 po", weight: "0,5 kg", bonus: "Foco para magias arcanas", desc: "Objeto usado por conjuradores arcanos para canalizar magias." },
+  { name: "Simbolo sagrado", type: "Foco de conjuracao", category: "Foco", cost: "5 po", weight: "0,5 kg", bonus: "Foco para magias divinas", desc: "Objeto sagrado usado como foco por clerigos e paladinos." }
+].map((item) => ({ ...item, system: "dnd5e", image: item.image || `dnd-${normalizeKey(item.name)}` }));
+
+const DND_WEAPON_CATALOG_BASE = [
+  ["Clube", "Simples", "Corpo a corpo", "1d4", "Concussao", "Luz", "Lento", "2 libras"],
+  ["Punhal", "Simples", "Corpo a corpo", "1d4", "Perfuracao", "Sutileza, leve, arremesso 20/60", "Nick", "1 libra"],
+  ["Grande clube", "Simples", "Corpo a corpo", "1d8", "Contundente", "Duas maos", "Empurrar", "10 libras"],
+  ["Machado de mao", "Simples", "Corpo a corpo", "1d6", "Cortante", "Leve, arremessavel 20/60", "Vex", "2 libras"],
+  ["Dardo", "Simples", "Corpo a corpo", "1d6", "Perfuracao", "Arremessado 30/120", "Lento", "2 libras"],
+  ["Martelo leve", "Simples", "Corpo a corpo", "1d4", "Concussao", "Leve, arremessavel 20/60", "Nick", "2 libras"],
+  ["Maca", "Simples", "Corpo a corpo", "1d6", "Concussao", "-", "Seiva", "4 libras"],
+  ["Bastao", "Simples", "Corpo a corpo", "1d6", "Concussao", "Versatil 1d8", "Derrubar", "4 libras"],
+  ["Foice", "Simples", "Corpo a corpo", "1d4", "Cortante", "Luz", "Nick", "2 libras"],
+  ["Lanca simples", "Simples", "Corpo a corpo", "1d6", "Perfuracao", "Arremessavel 20/60, versatil 1d8", "Seiva", "3 libras"],
+  ["Dardo pequeno", "Simples", "A distancia", "1d4", "Perfuracao", "Sutileza, arremesso 20/60", "Vex", "1/4 libra"],
+  ["Besta leve", "Simples", "A distancia", "1d8", "Perfuracao", "Municao 80/320, carregamento, duas maos", "Lento", "5 libras"],
+  ["Arco curto", "Simples", "A distancia", "1d6", "Perfuracao", "Municao 80/320, duas maos", "Vex", "2 libras"],
+  ["Estilingue", "Simples", "A distancia", "1d4", "Concussao", "Municao 30/120", "Lento", "-"],
+  ["Machado de batalha", "Marcial", "Corpo a corpo", "1d8", "Cortante", "Versatil 1d10", "Derrubar", "4 libras"],
+  ["Mangual", "Marcial", "Corpo a corpo", "1d8", "Contundente", "-", "Seiva", "2 libras"],
+  ["Gladio", "Marcial", "Corpo a corpo", "1d10", "Cortante", "Pesado, alcance, duas maos", "Pastar", "6 libras"],
+  ["Grande machado", "Marcial", "Corpo a corpo", "1d12", "Cortante", "Pesado, duas maos", "Dividir", "7 libras"],
+  ["Espada grande", "Marcial", "Corpo a corpo", "2d6", "Cortante", "Pesado, duas maos", "Pastar", "6 libras"],
+  ["Alabarda", "Marcial", "Corpo a corpo", "1d10", "Cortante", "Pesado, alcance, duas maos", "Dividir", "6 libras"],
+  ["Lanca marcial", "Marcial", "Corpo a corpo", "1d10", "Perfuracao", "Pesado, alcance, duas maos, exceto montado", "Derrubar", "6 libras"],
+  ["Espada longa", "Marcial", "Corpo a corpo", "1d8", "Cortante", "Versatil 1d10", "Seiva", "3 libras"],
+  ["Maul", "Marcial", "Corpo a corpo", "2d6", "Contundente", "Pesado, duas maos", "Derrubar", "10 libras"],
+  ["Estrela da manha", "Marcial", "Corpo a corpo", "1d8", "Perfuracao", "-", "Seiva", "4 libras"],
+  ["Pique", "Marcial", "Corpo a corpo", "1d10", "Perfuracao", "Pesado, alcance, duas maos", "Empurrar", "18 libras"],
+  ["Espada", "Marcial", "Corpo a corpo", "1d8", "Perfuracao", "Sutileza", "Vex", "2 libras"],
+  ["Cimitarra", "Marcial", "Corpo a corpo", "1d6", "Cortante", "Delicadeza, luz", "Nick", "3 libras"],
+  ["Espada curta", "Marcial", "Corpo a corpo", "1d6", "Perfuracao", "Delicadeza, luz", "Vex", "2 libras"],
+  ["Tridente", "Marcial", "Corpo a corpo", "1d8", "Perfuracao", "Arremessavel 20/60, versatil 1d10", "Derrubar", "4 libras"],
+  ["Warhammer", "Marcial", "Corpo a corpo", "1d8", "Contundente", "Versatil 1d10", "Empurrar", "5 libras"],
+  ["Escolha de guerra", "Marcial", "Corpo a corpo", "1d8", "Perfuracao", "Versatil 1d10", "Seiva", "2 libras"],
+  ["Chicote", "Marcial", "Corpo a corpo", "1d4", "Cortante", "Sutileza, alcance", "Lento", "3 libras"],
+  ["Zarabatana", "Marcial", "A distancia", "1", "Perfuracao", "Municao 25/100, carregamento", "Vex", "1 libra"],
+  ["Besta de mao", "Marcial", "A distancia", "1d6", "Perfuracao", "Municao 30/120, leve, carregamento", "Vex", "3 libras"],
+  ["Besta pesada", "Marcial", "A distancia", "1d10", "Perfuracao", "Municao 100/400, pesada, carregamento, duas maos", "Empurrar", "18 libras"],
+  ["Arco longo", "Marcial", "A distancia", "1d8", "Perfuracao", "Municao 150/600, pesada, duas maos", "Lento", "2 libras"],
+  ["Mosquete", "Marcial", "A distancia", "1d12", "Perfuracao", "Municao 40/120, carregamento, duas maos", "Lento", "10 libras"],
+  ["Pistola", "Marcial", "A distancia", "1d10", "Perfuracao", "Municao 30/90, carregamento", "Vex", "3 libras"]
+].map(([name, subtype, rangeType, damage, damageType, properties, mastery, weight]) => ({
+  name,
+  type: `Arma ${subtype.toLowerCase()} ${rangeType.toLowerCase()}`,
+  category: "Arma",
+  inventoryCategory: "Armas",
+  subtype,
+  rangeType,
+  damage,
+  damageType,
+  properties,
+  mastery,
+  weight,
+  system: "dnd5e",
+  image: `dnd-${normalizeKey(name)}`,
+  desc: `${subtype} ${rangeType}. Dano ${damage} ${damageType}. Propriedades: ${properties}. Dominio: ${mastery}.`
+}));
+
+DND_WEAPON_CATALOG_BASE.forEach((weapon) => {
+  const existing = DND_EQUIPMENT_CATALOG.find((item) => normalizeKey(item.name) === normalizeKey(weapon.name));
+  if (existing) Object.assign(existing, weapon);
+  else DND_EQUIPMENT_CATALOG.push(weapon);
+});
+
+const DND_EQUIPMENT_BY_NAME = Object.fromEntries(DND_EQUIPMENT_CATALOG.map((item) => [normalizeKey(item.name), item]));
+
+const DND_INVENTORY_CATEGORIES = [
+  "Armas",
+  "Armaduras",
+  "Escudos",
+  "Equipamentos de Aventura",
+  "Ferramentas",
+  "Itens Magicos",
+  "Consumiveis",
+  "Tesouros",
+  "Outros"
+];
+
+const DND_HIT_DICE = {
+  Barbaro: 12,
+  Bardo: 8,
+  Bruxo: 8,
+  Clerigo: 8,
+  Druida: 8,
+  Feiticeiro: 6,
+  Guerreiro: 10,
+  Ladino: 8,
+  Mago: 6,
+  Monge: 8,
+  Paladino: 10,
+  Patrulheiro: 10
+};
+
+const DND_FULL_CASTER_SLOTS = {
+  1: [2,0,0,0,0,0,0,0,0],
+  2: [3,0,0,0,0,0,0,0,0],
+  3: [4,2,0,0,0,0,0,0,0],
+  4: [4,3,0,0,0,0,0,0,0],
+  5: [4,3,2,0,0,0,0,0,0],
+  6: [4,3,3,0,0,0,0,0,0],
+  7: [4,3,3,1,0,0,0,0,0],
+  8: [4,3,3,2,0,0,0,0,0],
+  9: [4,3,3,3,1,0,0,0,0],
+  10: [4,3,3,3,2,0,0,0,0],
+  11: [4,3,3,3,2,1,0,0,0],
+  12: [4,3,3,3,2,1,0,0,0],
+  13: [4,3,3,3,2,1,1,0,0],
+  14: [4,3,3,3,2,1,1,0,0],
+  15: [4,3,3,3,2,1,1,1,0],
+  16: [4,3,3,3,2,1,1,1,0],
+  17: [4,3,3,3,2,1,1,1,1],
+  18: [4,3,3,3,3,1,1,1,1],
+  19: [4,3,3,3,3,2,1,1,1],
+  20: [4,3,3,3,3,2,2,1,1]
+};
+
+function dndModifier(score) {
+  return Math.floor(((Number(score) || 10) - 10) / 2);
+}
+
+function dndSigned(value) {
+  const number = Number(value) || 0;
+  return number >= 0 ? `+${number}` : String(number);
+}
+
+function dndLevel(sheet) {
+  return clamp(Number(dndValue(sheet, "nivel", Number.parseInt(sheet.nex, 10) || 1)), 1, 20);
+}
+
+function dndProficiency(level) {
+  return Math.ceil((Number(level) || 1) / 4) + 1;
+}
+
+function dndAbilityScore(sheet, ability) {
+  return Number(dndValue(sheet, ability, 10)) || 10;
+}
+
+function dndClassName(sheet) {
+  return dndValue(sheet, "classe", sheet.className || "");
+}
+
+function dndHitDie(sheet) {
+  return Number(dndValue(sheet, "hitDie", DND_HIT_DICE[dndClassName(sheet)] || 8)) || 8;
+}
+
+function dndMaxHpByRule(sheet) {
+  const level = dndLevel(sheet);
+  const hitDie = dndHitDie(sheet);
+  const con = dndModifier(dndAbilityScore(sheet, "constituicao"));
+  return Math.max(1, hitDie + con + Math.max(0, level - 1) * (Math.ceil(hitDie / 2) + 1 + con));
+}
+
+function dndInventoryItems(sheet) {
+  return splitLines(sheet?.inventory)
+    .map((raw) => parseInventoryItem(raw, sheet))
+    .filter((item) => item.name && inventoryLineActive(item.raw));
+}
+
+function boolFromMeta(value) {
+  return ["1", "sim", "true", "ativo", "equipado", "emuso", "empunho", "yes"].includes(normalizeKey(value));
+}
+
+function dndInventoryCategory(item) {
+  const stats = item.stats || item;
+  const source = `${stats.inventoryCategory || ""} ${stats.category || ""} ${stats.type || ""} ${stats.subtype || ""} ${item.name || ""}`;
+  const key = normalizeKey(source);
+  if (key.includes("arma")) return "Armas";
+  if (key.includes("armadura")) return "Armaduras";
+  if (key.includes("escudo")) return "Escudos";
+  if (key.includes("ferramenta")) return "Ferramentas";
+  if (key.includes("magico") || key.includes("magica")) return "Itens Magicos";
+  if (key.includes("pocao") || key.includes("consumivel") || key.includes("racao")) return "Consumiveis";
+  if (key.includes("tesouro") || key.includes("moeda")) return "Tesouros";
+  if (key.includes("equipamento") || key.includes("aventura") || key.includes("foco")) return "Equipamentos de Aventura";
+  return "Outros";
+}
+
+function isDndWeaponItem(item) {
+  return dndInventoryCategory(item) === "Armas" || normalizeKey(item.stats?.category || "").includes("arma");
+}
+
+function isDndArmorItem(item) {
+  return dndInventoryCategory(item) === "Armaduras";
+}
+
+function isDndShieldItem(item) {
+  return dndInventoryCategory(item) === "Escudos";
+}
+
+function dndEquipmentBonuses(sheet) {
+  if (dndValue(sheet, "autoEquipment", true) === false) return { armor: null, shieldBonus: 0, shieldName: "" };
+  return dndInventoryItems(sheet).reduce((bonus, item) => {
+    const stats = item.stats || {};
+    const category = normalizeKey(stats.category || item.entry?.category || item.entry?.type || "");
+    if (stats.armorBase && (stats.armorInUse || stats.armaduraEmUso) && category.includes("armadura")) {
+      if (!bonus.armor || Number(stats.armorBase) > Number(bonus.armor.armorBase || 0)) {
+        bonus.armor = {
+          name: item.name,
+          armorBase: Number(stats.armorBase) || 10,
+          dexLimit: stats.dexLimit,
+          stealth: stats.stealth || "",
+          strength: stats.strength || ""
+        };
+      }
+    }
+    if ((stats.shieldInUse || stats.escudoEmUso) && (stats.shieldBonus || category.includes("escudo") || normalizeKey(item.name) === "escudo")) {
+      bonus.shieldBonus = Math.max(bonus.shieldBonus, Number(stats.shieldBonus || stats.bonusCa) || 2);
+      bonus.shieldName = item.name;
+    }
+    return bonus;
+  }, { armor: null, shieldBonus: 0, shieldName: "" });
+}
+
+function dndArmorClass(sheet) {
+  if (dndValue(sheet, "manualCa", false)) {
+    return Number(dndValue(sheet, "caManual", dndValue(sheet, "ca", sheet.defense || 10))) || 10;
+  }
+  const dex = dndModifier(dndAbilityScore(sheet, "destreza"));
+  const equipment = dndEquipmentBonuses(sheet);
+  const manualBase = Number(dndValue(sheet, "armorBase", 10)) || 10;
+  const armorBase = Math.max(manualBase, Number(equipment.armor?.armorBase) || 10);
+  const manualDexLimit = dndValue(sheet, "dexLimit", "");
+  const dexLimit = manualDexLimit === "" && equipment.armor ? equipment.armor.dexLimit : manualDexLimit;
+  const allowedDex = dexLimit === "" ? dex : Math.min(dex, Number(dexLimit) || 0);
+  return armorBase + allowedDex + (Number(dndValue(sheet, "shieldBonus", 0)) || 0) + equipment.shieldBonus + (Number(dndValue(sheet, "acBonus", 0)) || 0);
+}
+
+function dndInventoryText(sheet) {
+  const manual = dndValue(sheet, "equipamentos", "");
+  if (String(manual || "").trim()) return manual;
+  return dndInventoryItems(sheet)
+    .map((item) => `${item.name}${item.stats?.category ? ` | ${item.stats.category}` : ""}${item.stats?.damage ? ` | ${item.stats.damage}` : ""}${item.stats?.armorBase ? ` | CA ${item.stats.armorBase}` : ""}${item.stats?.shieldBonus ? ` | +${item.stats.shieldBonus} CA` : ""}`)
+    .join("\n");
+}
+
+function dndEquipmentSummaryMarkup(sheet) {
+  const items = dndInventoryItems(sheet);
+  if (!items.length) return `<p class="dnd-empty-equipment">Nenhum equipamento D&D cadastrado. Use a aba Inventario para adicionar.</p>`;
+  return `
+    <div class="dnd-equipment-summary">
+      ${DND_INVENTORY_CATEGORIES.map((category) => {
+        const categoryItems = items.filter((item) => dndInventoryCategory(item) === category);
+        if (!categoryItems.length) return "";
+        return `
+          <div class="dnd-equipment-sector">
+            <b>${escapeHtml(category)}</b>
+            <ul>
+              ${categoryItems.map((item) => `
+                <li>
+                  <span>${escapeHtml(item.name)}</span>
+                  <small>${item.stats.weaponReady ? "arma em punho" : item.stats.armorInUse ? "armadura em uso" : item.stats.shieldInUse ? "escudo em uso" : item.stats.equipped ? "equipado" : "guardado"}</small>
+                </li>
+              `).join("")}
+            </ul>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function dndAttacksFromInventory(sheet) {
+  return dndInventoryItems(sheet)
+    .filter((item) => (item.stats?.weaponReady || item.stats?.armaEmPunho) && (isDndWeaponItem(item) || item.stats?.damage))
+    .map((item) => `${item.name} | ${item.stats.damage || "1d4"} ${item.stats.damageType || ""} | ${item.stats.range || item.stats.rangeType || "1,5m"} | ${item.stats.properties || "-"}${item.stats.mastery ? ` | Dominio: ${item.stats.mastery}` : ""}`)
+    .join("\n");
+}
+
+function dndAttackTextareaValue(sheet) {
+  const manual = dndValue(sheet, "ataques", sheet.attacks || "");
+  const auto = dndAttacksFromInventory(sheet);
+  return [manual, auto].map((item) => String(item || "").trim()).filter(Boolean).join("\n");
+}
+
+function dndSpellSlotsFor(sheet) {
+  const level = dndLevel(sheet);
+  const manual = dndValue(sheet, "spellSlots", {});
+  const base = DND_FULL_CASTER_SLOTS[level] || [0,0,0,0,0,0,0,0,0];
+  return Array.from({ length: 9 }, (_, index) => Number(manual?.[index + 1] ?? base[index] ?? 0) || 0);
+}
+
+function dndDerived(sheet) {
+  const level = dndLevel(sheet);
+  const prof = dndProficiency(level);
+  const dex = dndModifier(dndAbilityScore(sheet, "destreza"));
+  const wis = dndModifier(dndAbilityScore(sheet, "sabedoria"));
+  const proficientSkills = dndValue(sheet, "proficientSkills", {});
+  const expertiseSkills = dndValue(sheet, "expertiseSkills", {});
+  const perceptionProf = proficientSkills?.percepcao ? prof : 0;
+  const perceptionExpertise = expertiseSkills?.percepcao ? prof : 0;
+  const spellAbility = dndValue(sheet, "spellcastingAbility", "carisma");
+  const spellMod = dndModifier(dndAbilityScore(sheet, spellAbility));
+  return {
+    level,
+    prof,
+    initiative: dex + (Number(dndValue(sheet, "initiativeBonus", 0)) || 0),
+    passivePerception: 10 + wis + perceptionProf + perceptionExpertise + (Number(dndValue(sheet, "passiveBonus", 0)) || 0),
+    ac: dndArmorClass(sheet),
+    maxHpByRule: dndMaxHpByRule(sheet),
+    hitDie: dndHitDie(sheet),
+    spellSaveDc: 8 + prof + spellMod + (Number(dndValue(sheet, "spellSaveDcBonus", 0)) || 0),
+    spellAttack: prof + spellMod + (Number(dndValue(sheet, "spellAttackBonusExtra", 0)) || 0)
+  };
+}
+
+function dndSelect(field, value, options, extra = "") {
+  return `<select data-dnd-field="${field}" ${extra}>${options.map((item) => {
+    const optionValue = Array.isArray(item) ? item[0] : item;
+    const label = Array.isArray(item) ? item[1] : item;
+    return `<option value="${escapeAttr(optionValue)}" ${String(optionValue) === String(value || "") ? "selected" : ""}>${escapeHtml(label)}</option>`;
+  }).join("")}</select>`;
+}
+
+function dndStatInput(sheet, field, label, name) {
+  const score = dndAbilityScore(sheet, field);
+  const mod = dndModifier(score);
+  const proficientSaves = dndValue(sheet, "proficientSaves", {});
+  const saveBonus = dndValue(sheet, "saveBonus", {});
+  const totalSave = mod + (proficientSaves?.[field] ? dndProficiency(dndLevel(sheet)) : 0) + (Number(saveBonus?.[field]) || 0);
+  return `
+    <article class="dnd-stat">
+      <span>${label}</span>
+      <input data-dnd-field="${field}" type="number" min="1" max="30" value="${escapeAttr(score)}" />
+      <b>${dndSigned(mod)}</b>
+      <label class="dnd-check"><input data-dnd-save="${field}" type="checkbox" ${proficientSaves?.[field] ? "checked" : ""} /> Save ${dndSigned(totalSave)}</label>
+      <small>${escapeHtml(name)}</small>
+    </article>
+  `;
+}
+
+function updateDndSheetField(field, value, numeric = false, rerender = false) {
+  const sheet = ensureActiveSheet();
+  sheet.dnd = { ...(sheet.dnd || {}) };
+  sheet.dnd[field] = numeric ? Number(value) : value;
+  if (field === "classe") {
+    sheet.className = value;
+    sheet.dnd.hitDie = DND_HIT_DICE[value] || sheet.dnd.hitDie || 8;
+  }
+  if (field === "raca") sheet.role = value;
+  if (field === "nivel") {
+    const level = clamp(Number(value) || 1, 1, 20);
+    sheet.dnd.nivel = level;
+    sheet.nex = String(level);
+    sheet.rank = `Nivel ${level}`;
+  }
+  if (field === "pv") sheet.hp = Number(value) || 0;
+  if (field === "pvMax") sheet.hpMax = Number(value) || 0;
+  if (["ca", "caManual", "manualCa", "autoEquipment", "armorBase", "dexLimit", "shieldBonus", "acBonus", "destreza"].includes(field)) {
+    sheet.dnd.ca = dndArmorClass(sheet);
+    sheet.defense = sheet.dnd.ca;
+    console.log("CA atualizada por equipamento", { ca: sheet.dnd.ca, auto: sheet.dnd.autoEquipment !== false, manual: !!sheet.dnd.manualCa });
+  }
+  if (field === "deslocamento") sheet.movement = Number(value) || 9;
+  if (field === "proficiencias") sheet.skills = value;
+  if (field === "equipamentos") sheet.inventory = value;
+  if (field === "magias") sheet.rituals = value;
+  if (field === "anotacoes") sheet.notes = value;
+  if (field === "ataques") sheet.attacks = value;
+  if (field === "tracos") sheet.abilities = value;
+  if (field === "personalidade") sheet.personality = value;
+  syncSheetToken(sheet);
+  if (rerender) localOnlyRender();
+  else {
+    suppressOnlineSave = true;
+    save();
+    suppressOnlineSave = false;
+  }
+  queueSheetPatch(sheet, "dnd", 800);
+}
+
+function updateDndCollection(collection, key, value, rerender = true) {
+  const sheet = ensureActiveSheet();
+  sheet.dnd = { ...(sheet.dnd || {}), [collection]: { ...(sheet.dnd?.[collection] || {}) } };
+  sheet.dnd[collection][key] = value;
+  if (rerender) localOnlyRender();
+  else save();
+  queueSheetPatch(sheet, "dnd", 800);
+}
+
+function dndSkillRows(sheet) {
+  const derived = dndDerived(sheet);
+  const proficient = dndValue(sheet, "proficientSkills", {});
+  const expertise = dndValue(sheet, "expertiseSkills", {});
+  const bonus = dndValue(sheet, "skillBonus", {});
+  return DND_SKILLS.map(([key, label, ability]) => {
+    const total = dndModifier(dndAbilityScore(sheet, ability)) +
+      (proficient?.[key] ? derived.prof : 0) +
+      (expertise?.[key] ? derived.prof : 0) +
+      (Number(bonus?.[key]) || 0);
+    const abilityLabel = DND_ABILITIES.find((item) => item[0] === ability)?.[1] || "";
+    return `
+      <tr>
+        <td><input data-dnd-skill="${key}" type="checkbox" ${proficient?.[key] ? "checked" : ""} /></td>
+        <td><input data-dnd-expertise="${key}" type="checkbox" ${expertise?.[key] ? "checked" : ""} /></td>
+        <td><button type="button" data-dnd-roll="${label}" data-dnd-roll-mod="${total}">${escapeHtml(label)}</button></td>
+        <td>${abilityLabel}</td>
+        <td>${dndSigned(total)}</td>
+      </tr>
+    `;
+  }).join("");
+}
+
+function dndDeathChecks(sheet, field, label) {
+  const value = clamp(Number(dndValue(sheet, field, 0)) || 0, 0, 3);
+  return `
+    <label class="dnd-death-row">${label}
+      <span>${[1, 2, 3].map((index) => `<input data-dnd-death="${field}" data-dnd-death-value="${index}" type="checkbox" ${value >= index ? "checked" : ""} />`).join("")}</span>
+    </label>
+  `;
+}
+
+function dndSpellSlots(sheet) {
+  const slots = dndSpellSlotsFor(sheet);
+  const used = dndValue(sheet, "spellSlotsUsed", {});
+  return slots.map((max, index) => {
+    const level = index + 1;
+    return `
+      <label>
+        <span>Nivel ${level}</span>
+        <input data-dnd-slot="${level}" type="number" min="0" max="9" value="${escapeAttr(max)}" />
+        <input data-dnd-slot-used="${level}" type="number" min="0" max="9" value="${escapeAttr(Number(used?.[level]) || 0)}" />
+      </label>
+    `;
+  }).join("");
+}
+
+function dndAbilitySelect(field, value) {
+  return dndSelect(field, value, DND_ABILITIES.map(([key, label, name]) => [key, `${label} - ${name}`]));
+}
+
+function dndHeroSheetMarkup(sheet, derived, spellSlots) {
+  const dndPanelLayout = dndLayoutSettings();
+  const saves = dndValue(sheet, "proficientSaves", {});
+  const saveStrip = DND_ABILITIES.map(([field, label, name]) => {
+    const total = dndModifier(dndAbilityScore(sheet, field)) + (saves?.[field] ? derived.prof : 0);
+    return `
+      <label class="dnd-save-line" title="Salvaguarda de ${escapeAttr(name)}">
+        <input data-dnd-save="${escapeAttr(field)}" type="checkbox" ${saves?.[field] ? "checked" : ""} />
+        <span>${escapeHtml(label)}</span>
+        <b>${dndSigned(total)}</b>
+      </label>
+    `;
+  }).join("");
+  const abilityColumn = DND_ABILITIES.map(([field, label, name]) => {
+    const score = dndAbilityScore(sheet, field);
+    return `
+      <label class="dnd-ability-box dnd-ability-${escapeAttr(field)}" title="${escapeAttr(name)}">
+        <span>${escapeHtml(label)}</span>
+        <input data-dnd-field="${escapeAttr(field)}" type="number" min="1" max="30" value="${escapeAttr(score)}" />
+        <b>${dndSigned(dndModifier(score))}</b>
+      </label>
+    `;
+  }).join("");
+  const passiveInsight = 10 + dndModifier(dndAbilityScore(sheet, "sabedoria")) + (dndValue(sheet, "proficientSkills", {})?.insight ? derived.prof : 0);
+  const passiveInvestigation = 10 + dndModifier(dndAbilityScore(sheet, "inteligencia")) + (dndValue(sheet, "proficientSkills", {})?.investigation ? derived.prof : 0);
+  const emptyPortrait = `<b>${escapeHtml(initials(sheet.name || "AV"))}</b><small>Clique para foto</small>`;
+  return `
+    ${renderMasterSheetNavigator(sheet)}
+    <section class="dnd-sheet dnd-classic-sheet">
+      <header class="dnd-classic-head">
+        <div class="dnd-dragon-brand">
+          <span>Dungeons & Dragons</span>
+          <b>5e</b>
+        </div>
+        <label class="dnd-character-name">
+          <span>Nome do personagem</span>
+          <input data-sheet-field="name" value="${escapeAttr(sheet.name || "Aventureiro")}" />
+        </label>
+        <div class="dnd-classic-identity">
+          <label>Classe ${dndSelect("classe", dndClassName(sheet), DND_CLASSES)}</label>
+          <label>Nivel <input data-dnd-field="nivel" type="number" min="1" max="20" value="${escapeAttr(derived.level)}" /></label>
+          <label>Jogador <input data-sheet-field="player" value="${escapeAttr(sheet.player || "")}" /></label>
+          <label>Raca ${dndSelect("raca", dndValue(sheet, "raca", sheet.role || "Humano"), DND_RACES)}</label>
+          <label>Antecedente ${dndSelect("antecedente", dndValue(sheet, "antecedente", ""), [["", "Escolha"], ...DND_BACKGROUNDS.map((item) => [item, item])])}</label>
+          <label>XP <input data-dnd-field="experiencia" type="number" min="0" value="${escapeAttr(dndValue(sheet, "experiencia", 0))}" /></label>
+        </div>
+      </header>
+
+      <div class="dnd-classic-grid">
+        <aside class="dnd-classic-left">
+          <section class="dnd-attributes-title">Atributos</section>
+          <div class="dnd-ability-column">${abilityColumn}</div>
+          <section class="dnd-box dnd-save-panel">
+            <h3>Salvaguardas</h3>
+            ${saveStrip}
+          </section>
+          <section class="dnd-box dnd-skills-card">
+            <h3>Pericias</h3>
+            <table class="dnd-skills-table">
+              <thead><tr><th>Prof.</th><th>Esp.</th><th>Pericia</th><th>Atr.</th><th>Total</th></tr></thead>
+              <tbody>${dndSkillRows(sheet)}</tbody>
+            </table>
+          </section>
+        </aside>
+
+        <main class="dnd-classic-main is-layout-fixed" data-dnd-layout-panel style="--dnd-panel-x:${escapeAttr(dndPanelLayout.x)}px; --dnd-panel-y:${escapeAttr(dndPanelLayout.y)}px;">
+          <section class="dnd-top-stats">
+            <label><span>Inspiracao</span><input data-dnd-field="inspiration" type="checkbox" ${dndValue(sheet, "inspiration", false) ? "checked" : ""} /></label>
+            <b><span>Proficiencia</span>${dndSigned(derived.prof)}</b>
+            <b><span>CA</span>${derived.ac}</b>
+            <b><span>Iniciativa</span>${dndSigned(derived.initiative)}</b>
+            <b><span>Desloc.</span>${dndValue(sheet, "deslocamento", sheet.movement || 9)}m</b>
+          </section>
+          <section class="dnd-box dnd-resources-box">
+            <h3>Combate</h3>
+            <div class="dnd-equipment-rules">
+              <label class="dnd-check"><input data-dnd-field="autoEquipment" type="checkbox" ${dndValue(sheet, "autoEquipment", true) !== false ? "checked" : ""} /> Usar calculo automatico de equipamento</label>
+              <label class="dnd-check"><input data-dnd-field="manualCa" type="checkbox" ${dndValue(sheet, "manualCa", false) ? "checked" : ""} /> CA manual</label>
+              <label>CA manual <input data-dnd-field="caManual" type="number" value="${escapeAttr(dndValue(sheet, "caManual", derived.ac))}" /></label>
+            </div>
+            <div class="dnd-resource-grid">
+              <label>PV atual <input data-dnd-field="pv" type="number" value="${escapeAttr(dndValue(sheet, "pv", sheet.hp || 10))}" /></label>
+              <label>PV max <input data-dnd-field="pvMax" type="number" value="${escapeAttr(dndValue(sheet, "pvMax", sheet.hpMax || 10))}" /><small>Regra sugere ${derived.maxHpByRule}</small></label>
+              <label>PV temp <input data-dnd-field="pvTemporario" type="number" min="0" value="${escapeAttr(dndValue(sheet, "pvTemporario", 0))}" /></label>
+              <label>Dado vida <input data-dnd-field="hitDie" type="number" min="4" max="12" value="${escapeAttr(derived.hitDie)}" /></label>
+              <label>Dados gastos <input data-dnd-field="hitDiceUsed" type="number" min="0" max="${derived.level}" value="${escapeAttr(dndValue(sheet, "hitDiceUsed", 0))}" /></label>
+              <label>Armadura base <input data-dnd-field="armorBase" type="number" value="${escapeAttr(dndValue(sheet, "armorBase", 10))}" /></label>
+              <label>Escudo <input data-dnd-field="shieldBonus" type="number" value="${escapeAttr(dndValue(sheet, "shieldBonus", 0))}" /></label>
+              <label>Bonus CA <input data-dnd-field="acBonus" type="number" value="${escapeAttr(dndValue(sheet, "acBonus", 0))}" /></label>
+              <label>Limite DES <input data-dnd-field="dexLimit" type="number" placeholder="sem limite" value="${escapeAttr(dndValue(sheet, "dexLimit", ""))}" /></label>
+              <label>Bonus iniciativa <input data-dnd-field="initiativeBonus" type="number" value="${escapeAttr(dndValue(sheet, "initiativeBonus", 0))}" /></label>
+              <label>Deslocamento <input data-dnd-field="deslocamento" type="number" min="0" value="${escapeAttr(dndValue(sheet, "deslocamento", sheet.movement || 9))}" /></label>
+            </div>
+            <div class="dnd-death-grid">
+              ${dndDeathChecks(sheet, "deathSuccess", "Sucessos contra morte")}
+              ${dndDeathChecks(sheet, "deathFailure", "Falhas contra morte")}
+            </div>
+            <div class="sheet-damage-tools">
+              <label>Dano ou cura <input data-sheet-damage-value type="number" min="0" placeholder="0" /></label>
+              <button type="button" data-sheet-damage-apply>Dano</button>
+              <button type="button" data-sheet-heal-apply>Cura</button>
+            </div>
+          </section>
+          <section class="dnd-box dnd-attack-card">
+            <h3>Ataques e conjuracao</h3>
+            <textarea data-dnd-field="ataques" placeholder="Espada longa | +5 | 1d8 cortante | alcance 1,5m&#10;Arco curto | +5 | 1d6 perfurante | 24/96m">${escapeHtml(dndAttackTextareaValue(sheet))}</textarea>
+          </section>
+        </main>
+
+        <aside class="dnd-classic-right">
+          <label class="profile-photo-trigger dnd-classic-portrait" title="Trocar foto do personagem">
+            <span class="profile-photo-preview" style="${sheet.portrait ? `background-image:url('${escapeAttr(sheet.portrait)}')` : ""}">
+              ${sheet.portrait ? "" : emptyPortrait}
+            </span>
+            <input data-profile-photo type="file" accept="image/*" />
+          </label>
+          <section class="dnd-box dnd-passive-box">
+            <h3>Sentidos passivos</h3>
+            <b>Percepcao passiva ${derived.passivePerception}</b>
+            <b>Intuicao passiva ${passiveInsight}</b>
+            <b>Investigacao passiva ${passiveInvestigation}</b>
+          </section>
+          <section class="dnd-box dnd-magic-panel dnd-grimoire-panel">
+            <h3>Magia</h3>
+            <div class="dnd-magic-stats">
+              <label>Atributo ${dndAbilitySelect("spellcastingAbility", dndValue(sheet, "spellcastingAbility", "carisma"))}</label>
+              <b>CD ${derived.spellSaveDc}</b>
+              <b>Ataque ${dndSigned(derived.spellAttack)}</b>
+            </div>
+            <div class="dnd-slot-grid">
+              <span>Nivel</span><span>Total</span><span>Gastos</span>
+              ${spellSlots}
+            </div>
+            <label>Magias preparadas / conhecidas <textarea data-dnd-field="magiasPreparadas">${escapeHtml(dndValue(sheet, "magiasPreparadas", ""))}</textarea></label>
+          </section>
+          <section class="dnd-box"><h3>Personalidade</h3><textarea data-dnd-field="personalidade">${escapeHtml(dndValue(sheet, "personalidade", sheet.personality || ""))}</textarea></section>
+          <section class="dnd-box"><h3>Ideais</h3><textarea data-dnd-field="ideais">${escapeHtml(dndValue(sheet, "ideais", ""))}</textarea></section>
+          <section class="dnd-box"><h3>Vinculos</h3><textarea data-dnd-field="vinculos">${escapeHtml(dndValue(sheet, "vinculos", ""))}</textarea></section>
+          <section class="dnd-box"><h3>Defeitos</h3><textarea data-dnd-field="defeitos">${escapeHtml(dndValue(sheet, "defeitos", ""))}</textarea></section>
+        </aside>
+      </div>
+
+      <div class="dnd-classic-bottom">
+        <section class="dnd-box"><h3>Tracos e recursos</h3><textarea data-dnd-field="tracos" placeholder="Caracteristicas de classe, raca, talentos e recursos.">${escapeHtml(dndValue(sheet, "tracos", sheet.abilities || ""))}</textarea></section>
+        <section class="dnd-box"><h3>Proficiencias e idiomas</h3><textarea data-dnd-field="proficiencias">${escapeHtml(dndValue(sheet, "proficiencias", sheet.skills || ""))}</textarea></section>
+        <section class="dnd-box dnd-equipment-wide"><h3>Equipamentos</h3>${dndEquipmentSummaryMarkup(sheet)}<button type="button" data-dnd-open-inventory>Gerenciar inventario</button></section>
+        <section class="dnd-box"><h3>Tesouro</h3><textarea data-dnd-field="tesouro">${escapeHtml(dndValue(sheet, "tesouro", ""))}</textarea></section>
+        <section class="dnd-box dnd-notes-wide"><h3>Anotacoes</h3><textarea data-dnd-field="anotacoes">${escapeHtml(dndValue(sheet, "anotacoes", sheet.notes || ""))}</textarea></section>
+      </div>
+
+      <footer class="dnd-sheet-foot">
+        <button type="button" data-save-dnd-sheet>Salvar ficha</button>
+        <span>Sistema: ${escapeHtml(systemFor(sheet.sistemaRegra).nome)}</span>
+      </footer>
+    </section>
+  `;
+}
+
+function renderDndSheet(sheet) {
+  if (!els.crisisSheet) return;
+  document.body.classList.add("theme-dnd5e", "theme-dnd", "campaign-dnd");
+  document.body.dataset.campaignSystem = "dnd5e";
+  sheet.dnd = normalizeSheet(sheet).dnd;
+  const derived = dndDerived(sheet);
+  const spellSlots = dndSpellSlots(sheet);
+  els.crisisSheet.innerHTML = `
+    ${renderMasterSheetNavigator(sheet)}
+    <section class="dnd-sheet">
+      <header class="dnd-sheet-head">
+        <div>
+          <span class="dnd-system-pill">D&D 5e</span>
+          <h2>Ficha do aventureiro</h2>
+          <p>Ficha editavel com calculos de modificador, proficiencia, pericias, salvaguardas, combate e magia.</p>
+        </div>
+        <label class="profile-photo-trigger dnd-avatar" title="Trocar foto do personagem">
+          <span class="profile-photo-preview" style="${sheet.portrait ? `background-image:url('${escapeAttr(sheet.portrait)}')` : ""}">${sheet.portrait ? "" : escapeHtml(initials(sheet.name || "AV"))}</span>
+          <input data-profile-photo type="file" accept="image/*" />
+        </label>
+      </header>
+
+      <div class="dnd-identity-grid">
+        <label>Personagem <input data-sheet-field="name" value="${escapeAttr(sheet.name || "Aventureiro")}" /></label>
+        <label>Jogador <input data-sheet-field="player" value="${escapeAttr(sheet.player || "")}" /></label>
+        <label>Classe ${dndSelect("classe", dndClassName(sheet), DND_CLASSES)}</label>
+        <label>Raca ${dndSelect("raca", dndValue(sheet, "raca", sheet.role || "Humano"), DND_RACES)}</label>
+        <label>Antecedente ${dndSelect("antecedente", dndValue(sheet, "antecedente", ""), [["", "Escolha o antecedente"], ...DND_BACKGROUNDS.map((item) => [item, item])])}</label>
+        <label>Alinhamento <input data-dnd-field="alinhamento" value="${escapeAttr(dndValue(sheet, "alinhamento", ""))}" /></label>
+        <label>Nivel <input data-dnd-field="nivel" type="number" min="1" max="20" value="${escapeAttr(derived.level)}" /></label>
+        <label>Experiencia <input data-dnd-field="experiencia" type="number" min="0" value="${escapeAttr(dndValue(sheet, "experiencia", 0))}" /></label>
+      </div>
+
+      <div class="dnd-core-grid">
+        <section class="dnd-card">
+          <h3>Atributos e salvaguardas</h3>
+          <div class="dnd-stats-grid">
+            ${DND_ABILITIES.map(([field, label, name]) => dndStatInput(sheet, field, label, name)).join("")}
+          </div>
+        </section>
+        <section class="dnd-card dnd-vitals">
+          <h3>Combate</h3>
+          <div class="dnd-derived-grid">
+            <b>Prof. ${dndSigned(derived.prof)}</b>
+            <b>CA ${derived.ac}</b>
+            <b>Inic. ${dndSigned(derived.initiative)}</b>
+            <b>Passiva ${derived.passivePerception}</b>
+          </div>
+          <div class="dnd-equipment-rules">
+            <label class="dnd-check"><input data-dnd-field="autoEquipment" type="checkbox" ${dndValue(sheet, "autoEquipment", true) !== false ? "checked" : ""} /> Usar calculo automatico de equipamento</label>
+            <label class="dnd-check"><input data-dnd-field="manualCa" type="checkbox" ${dndValue(sheet, "manualCa", false) ? "checked" : ""} /> CA manual</label>
+            <label>CA manual <input data-dnd-field="caManual" type="number" value="${escapeAttr(dndValue(sheet, "caManual", derived.ac))}" /></label>
+          </div>
+          <label>PV atual <input data-dnd-field="pv" type="number" value="${escapeAttr(dndValue(sheet, "pv", sheet.hp || 10))}" /></label>
+          <label>PV max <input data-dnd-field="pvMax" type="number" value="${escapeAttr(dndValue(sheet, "pvMax", sheet.hpMax || 10))}" /><small>Regra sugere ${derived.maxHpByRule}</small></label>
+          <label>PV temporario <input data-dnd-field="pvTemporario" type="number" min="0" value="${escapeAttr(dndValue(sheet, "pvTemporario", 0))}" /></label>
+          <div class="dnd-ac-grid">
+            <label>Armadura base <input data-dnd-field="armorBase" type="number" value="${escapeAttr(dndValue(sheet, "armorBase", 10))}" /></label>
+            <label>Limite DES <input data-dnd-field="dexLimit" type="number" placeholder="sem limite" value="${escapeAttr(dndValue(sheet, "dexLimit", ""))}" /></label>
+            <label>Escudo <input data-dnd-field="shieldBonus" type="number" value="${escapeAttr(dndValue(sheet, "shieldBonus", 0))}" /></label>
+            <label>Bonus CA <input data-dnd-field="acBonus" type="number" value="${escapeAttr(dndValue(sheet, "acBonus", 0))}" /></label>
+          </div>
+          <label>Deslocamento <input data-dnd-field="deslocamento" type="number" min="0" value="${escapeAttr(dndValue(sheet, "deslocamento", sheet.movement || 9))}" /></label>
+          <label>Bonus iniciativa <input data-dnd-field="initiativeBonus" type="number" value="${escapeAttr(dndValue(sheet, "initiativeBonus", 0))}" /></label>
+          <div class="dnd-hitdice-grid">
+            <label>Dado de vida <input data-dnd-field="hitDie" type="number" min="4" max="12" value="${escapeAttr(derived.hitDie)}" /></label>
+            <label>Dados gastos <input data-dnd-field="hitDiceUsed" type="number" min="0" max="${derived.level}" value="${escapeAttr(dndValue(sheet, "hitDiceUsed", 0))}" /></label>
+          </div>
+          <div class="dnd-death-grid">
+            ${dndDeathChecks(sheet, "deathSuccess", "Sucessos contra morte")}
+            ${dndDeathChecks(sheet, "deathFailure", "Falhas contra morte")}
+          </div>
+          <div class="sheet-damage-tools">
+            <label>Dano ou cura <input data-sheet-damage-value type="number" min="0" placeholder="0" /></label>
+            <button type="button" data-sheet-damage-apply>Dano</button>
+            <button type="button" data-sheet-heal-apply>Cura</button>
+          </div>
+        </section>
+      </div>
+
+      <div class="dnd-rules-grid">
+        <section class="dnd-card dnd-skills-card">
+          <h3>Pericias</h3>
+          <table class="dnd-skills-table">
+            <thead><tr><th>Prof.</th><th>Esp.</th><th>Pericia</th><th>Atr.</th><th>Total</th></tr></thead>
+            <tbody>${dndSkillRows(sheet)}</tbody>
+          </table>
+        </section>
+        <section class="dnd-card">
+          <h3>Ataques</h3>
+          <textarea data-dnd-field="ataques" placeholder="Espada longa | +5 | 1d8 cortante | alcance 1,5m&#10;Arco curto | +5 | 1d6 perfurante | 24/96m">${escapeHtml(dndAttackTextareaValue(sheet))}</textarea>
+          <small>Use uma linha por ataque. O botão de rolagem da mesa aceita formulas como 1d20+5 e 1d8+3.</small>
+        </section>
+      </div>
+
+      <div class="dnd-magic-grid">
+        <section class="dnd-card">
+          <h3>Magia</h3>
+          <div class="dnd-magic-stats">
+            <label>Atributo de conjuracao ${dndAbilitySelect("spellcastingAbility", dndValue(sheet, "spellcastingAbility", "carisma"))}</label>
+            <b>CD ${derived.spellSaveDc}</b>
+            <b>Ataque ${dndSigned(derived.spellAttack)}</b>
+          </div>
+          <div class="dnd-slot-grid">
+            <span>Nivel</span><span>Total</span><span>Gastos</span>
+            ${spellSlots}
+          </div>
+          <label>Magias preparadas / conhecidas <textarea data-dnd-field="magiasPreparadas">${escapeHtml(dndValue(sheet, "magiasPreparadas", ""))}</textarea></label>
+        </section>
+        <section class="dnd-card">
+          <h3>Tracos e recursos</h3>
+          <label class="dnd-check dnd-inspiration"><input data-dnd-field="inspiration" type="checkbox" ${dndValue(sheet, "inspiration", false) ? "checked" : ""} /> Inspiracao</label>
+          <textarea data-dnd-field="tracos" placeholder="Caracteristicas de classe, raca, talentos e recursos.">${escapeHtml(dndValue(sheet, "tracos", sheet.abilities || ""))}</textarea>
+        </section>
+      </div>
+
+      <div class="dnd-notes-grid">
+        <label><b>Proficiencias e idiomas</b><textarea data-dnd-field="proficiencias">${escapeHtml(dndValue(sheet, "proficiencias", sheet.skills || ""))}</textarea></label>
+        <label class="dnd-equipment-wide"><b>Equipamentos</b>${dndEquipmentSummaryMarkup(sheet)}<button type="button" data-dnd-open-inventory>Gerenciar inventario</button></label>
+        <label><b>Tesouro</b><textarea data-dnd-field="tesouro">${escapeHtml(dndValue(sheet, "tesouro", ""))}</textarea></label>
+        <label><b>Personalidade</b><textarea data-dnd-field="personalidade">${escapeHtml(dndValue(sheet, "personalidade", sheet.personality || ""))}</textarea></label>
+        <label><b>Ideais / Vinculos / Defeitos</b><textarea data-dnd-field="ideais">${escapeHtml(dndValue(sheet, "ideais", ""))}</textarea><textarea data-dnd-field="vinculos">${escapeHtml(dndValue(sheet, "vinculos", ""))}</textarea><textarea data-dnd-field="defeitos">${escapeHtml(dndValue(sheet, "defeitos", ""))}</textarea></label>
+        <label><b>Anotacoes</b><textarea data-dnd-field="anotacoes">${escapeHtml(dndValue(sheet, "anotacoes", sheet.notes || ""))}</textarea></label>
+      </div>
+
+      <footer class="dnd-sheet-foot">
+        <button type="button" data-save-dnd-sheet>Salvar ficha</button>
+        <span>Sistema: ${escapeHtml(systemFor(sheet.sistemaRegra).nome)}</span>
+      </footer>
+    </section>
+  `;
+  els.crisisSheet.innerHTML = dndHeroSheetMarkup(sheet, derived, spellSlots);
+
+  els.crisisSheet.querySelectorAll("[data-sheet-field]").forEach((field) => {
+    field.addEventListener("input", () => updateActiveSheet(field.dataset.sheetField, field.value, field.type === "number", false));
+    field.addEventListener("change", () => updateActiveSheet(field.dataset.sheetField, field.value, field.type === "number"));
+  });
+  els.crisisSheet.querySelectorAll("[data-dnd-field]").forEach((field) => {
+    const isNumeric = field.type === "number" && field.dataset.dndField !== "dexLimit";
+    const readValue = () => field.type === "checkbox" ? field.checked : field.value;
+    field.addEventListener("input", () => updateDndSheetField(field.dataset.dndField, readValue(), isNumeric, false));
+    field.addEventListener("change", () => updateDndSheetField(field.dataset.dndField, readValue(), isNumeric, ["classe", "nivel", "forca", "destreza", "constituicao", "inteligencia", "sabedoria", "carisma", "armorBase", "dexLimit", "shieldBonus", "acBonus", "initiativeBonus", "hitDie", "spellcastingAbility", "autoEquipment", "manualCa", "caManual"].includes(field.dataset.dndField)));
+  });
+  els.crisisSheet.querySelectorAll("[data-dnd-save]").forEach((field) => {
+    field.addEventListener("change", () => updateDndCollection("proficientSaves", field.dataset.dndSave, field.checked));
+  });
+  els.crisisSheet.querySelectorAll("[data-dnd-skill]").forEach((field) => {
+    field.addEventListener("change", () => updateDndCollection("proficientSkills", field.dataset.dndSkill, field.checked));
+  });
+  els.crisisSheet.querySelectorAll("[data-dnd-expertise]").forEach((field) => {
+    field.addEventListener("change", () => updateDndCollection("expertiseSkills", field.dataset.dndExpertise, field.checked));
+  });
+  els.crisisSheet.querySelectorAll("[data-dnd-death]").forEach((field) => {
+    field.addEventListener("change", () => updateDndSheetField(field.dataset.dndDeath, field.checked ? field.dataset.dndDeathValue : Number(field.dataset.dndDeathValue) - 1, true, true));
+  });
+  els.crisisSheet.querySelectorAll("[data-dnd-slot]").forEach((field) => {
+    field.addEventListener("change", () => updateDndCollection("spellSlots", field.dataset.dndSlot, Number(field.value) || 0, true));
+  });
+  els.crisisSheet.querySelectorAll("[data-dnd-slot-used]").forEach((field) => {
+    field.addEventListener("change", () => updateDndCollection("spellSlotsUsed", field.dataset.dndSlotUsed, Number(field.value) || 0, true));
+  });
+  els.crisisSheet.querySelectorAll("[data-dnd-roll]").forEach((button) => {
+    button.addEventListener("click", () => performRoll(`1d20${dndSigned(button.dataset.dndRollMod)}`));
+  });
+  els.crisisSheet.querySelectorAll("[data-master-sheet]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.activeSheetId = button.dataset.masterSheet;
+      masterInventorySheetId = button.dataset.masterSheet;
+      renderAll();
+    });
+  });
+  els.crisisSheet.querySelector("[data-profile-photo]")?.addEventListener("change", (event) => {
+    uploadProfilePhoto(event.target.files?.[0]);
+  });
+  els.crisisSheet.querySelector("[data-sheet-damage-apply]")?.addEventListener("click", () => {
+    const value = Number(els.crisisSheet.querySelector("[data-sheet-damage-value]")?.value || 0);
+    applySheetDamage(sheet.id, value, "damage");
+  });
+  els.crisisSheet.querySelector("[data-sheet-heal-apply]")?.addEventListener("click", () => {
+    const value = Number(els.crisisSheet.querySelector("[data-sheet-damage-value]")?.value || 0);
+    applySheetDamage(sheet.id, value, "heal");
+  });
+  els.crisisSheet.querySelector("[data-save-dnd-sheet]")?.addEventListener("click", () => {
+    save();
+    queueSheetPatch(ensureActiveSheet(), "dnd", 100);
+    setSyncStatus("Ficha D&D salva.");
+  });
+  els.crisisSheet.querySelectorAll("[data-dnd-open-inventory]").forEach((button) => {
+    button.addEventListener("click", () => switchTab("inventario"));
+  });
+}
+
 function renderCrisisSheet() {
   if (!els.crisisSheet) return;
   const sheet = ensureActiveSheet();
+  if (normalizeSystemId(sheet.sistemaRegra) === "dnd5e") {
+    renderDndSheet(sheet);
+    return;
+  }
   const canEditNex = isMasterMode();
   const skills = parseSkills(sheet);
   const attacks = splitLines(sheet.attacks);
@@ -3408,6 +4647,16 @@ function openEmptyCatalog(field) {
 
 function catalogForField(field) {
   const sheet = ensureActiveSheet();
+  const isDnd = sheetSystemId(sheet) === "dnd5e";
+  if (isDnd) {
+    if (field === "inventory") return DND_EQUIPMENT_CATALOG;
+    if (field === "attacks") {
+      return DND_EQUIPMENT_CATALOG
+        .filter((entry) => normalizeKey(entry.category).includes("arma") || entry.damage)
+        .map((entry) => ({ ...entry, type: `Ataque - ${entry.type}` }));
+    }
+    if (field === "rituals") return [];
+  }
   if (field === "abilities") {
     const role = normalizeKey(sheet.role);
     const className = normalizeKey(sheet.className);
@@ -3449,6 +4698,35 @@ function catalogForField(field) {
   }[field] || [];
 }
 
+function dndInventoryLine(entry) {
+  const category = dndInventoryCategory({ name: entry.name, stats: entry, entry });
+  const meta = [
+    ["Categoria", category],
+    ["Tipo", entry.category || entry.type],
+    ["Subtipo", entry.subtype || ""],
+    ["Quantidade", entry.quantity || 1],
+    ["Peso", entry.weight],
+    ["Dano", entry.damage],
+    ["Tipo dano", entry.damageType],
+    ["Alcance", entry.range],
+    ["Alcance tipo", entry.rangeType],
+    ["Propriedades", entry.properties],
+    ["Dominio", entry.mastery],
+    ["CA", entry.armorBase],
+    ["Limite DES", entry.dexLimit],
+    ["Escudo", entry.shieldBonus],
+    ["Furtividade", entry.stealth],
+    ["Forca", entry.strength],
+    ["Bonus CA", entry.bonusCa],
+    ["Bonus", entry.bonus],
+    ["Imagem", entry.image]
+  ]
+    .filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== "")
+    .map(([label, value]) => `${label}: ${value}`)
+    .join(" | ");
+  return `${entry.name}${meta ? ` | ${meta}` : ""} - ${entry.desc || ""}`;
+}
+
 function catalogTitle(field) {
   return {
     nex: "Catalogo de NEX",
@@ -3482,6 +4760,14 @@ function addCatalogEntry(field, entry) {
     return;
   }
   if (field === "attacks") {
+    if (sheetSystemId(sheet) === "dnd5e") {
+      const line = `${entry.name} | ${entry.damage || "1d4"} | ${entry.range || "1,5m"} | ${entry.properties || entry.desc || "-"}`;
+      sheet.attacks = splitLines(sheet.attacks).concat(line).join("\n");
+      sheet.dnd = { ...(sheet.dnd || {}), ataques: splitLines(sheet.attacks).join("\n") };
+      localOnlyRender();
+      queueSheetPatch(sheet, "attacks", 800);
+      return;
+    }
     const stats = catalogStats[entry.name] || {};
     const line = serializeAttackLine({
       name: entry.name,
@@ -3494,6 +4780,13 @@ function addCatalogEntry(field, entry) {
     sheet.attacks = splitLines(sheet.attacks).concat(line).join("\n");
     localOnlyRender();
     queueSheetPatch(sheet, "attacks", 800);
+    return;
+  }
+  if (field === "inventory" && sheetSystemId(sheet) === "dnd5e") {
+    sheet.inventory = splitLines(sheet.inventory).concat(dndInventoryLine(entry)).join("\n");
+    recalculateDerivedStats(sheet, field);
+    localOnlyRender();
+    queueSheetPatch(sheet, field, 800);
     return;
   }
   const safeDesc = String(entry.desc || "").replace(/\n/g, " ");
@@ -3521,6 +4814,23 @@ function catalogDetail(entry) {
 function catalogMeta(entry) {
   const stats = catalogStats[entry.name] || {};
   const entryType = normalizeKey(entry.type);
+  const dndEntry = entry.system === "dnd5e" ? entry : DND_EQUIPMENT_BY_NAME[normalizeKey(entry.name)];
+  if (dndEntry) {
+    return [
+      `Tipo: ${dndEntry.category || dndEntry.type || "-"}`,
+      dndEntry.weight ? `Peso: ${dndEntry.weight}` : "",
+      dndEntry.damage ? `Dano: ${dndEntry.damage}` : "",
+      dndEntry.damageType ? `Tipo de dano: ${dndEntry.damageType}` : "",
+      dndEntry.range ? `Alcance: ${dndEntry.range}` : "",
+      dndEntry.properties ? `Propriedades: ${dndEntry.properties}` : "",
+      dndEntry.mastery ? `Dominio: ${dndEntry.mastery}` : "",
+      dndEntry.armorBase ? `CA: ${dndEntry.armorBase}${dndEntry.dexLimit === "" ? " + DES" : dndEntry.dexLimit > 0 ? ` + DES max ${dndEntry.dexLimit}` : ""}` : "",
+      dndEntry.shieldBonus ? `Escudo: +${dndEntry.shieldBonus} CA` : "",
+      dndEntry.stealth ? `Furtividade: ${dndEntry.stealth}` : "",
+      dndEntry.strength ? `Forca minima: ${dndEntry.strength}` : "",
+      dndEntry.bonus ? `Bonus: ${dndEntry.bonus}` : ""
+    ].filter(Boolean);
+  }
   const isInventoryEntry = catalog.inventory.includes(entry) || catalog.inventory.some((item) => normalizeKey(item.name) === normalizeKey(entry.name));
   const isRitualEntry = catalog.rituals.includes(entry) || catalog.rituals.some((item) => normalizeKey(item.name) === normalizeKey(entry.name));
   if (catalog.origins.includes(entry) || entry.origin || entryType.includes("origem escolhida")) {
@@ -3789,11 +5099,59 @@ function renderSheetInfoCard(entry, field) {
   `;
 }
 
-function parseInventoryItem(raw) {
-  const parsed = parseInventoryLine(raw);
+function parseInventoryLineRich(raw) {
+  const [left, ...descriptionParts] = String(raw || "").split(" - ");
+  const parts = left.split("|").map((part) => part.trim()).filter(Boolean);
+  const meta = {};
+  parts.slice(1).forEach((part) => {
+    const [label, ...valueParts] = part.split(":");
+    if (!valueParts.length) return;
+    const key = normalizeKey(label).replace(/\s+/g, "");
+    const value = valueParts.join(":").trim();
+    if (key === "tipo") meta.category = value;
+    if (key === "categoria") meta.inventoryCategory = value;
+    if (key === "subtipo") meta.subtype = value;
+    if (key === "quantidade" || key === "qtd") meta.quantity = Math.max(1, Number(value) || 1);
+    if (key === "volume") meta.volume = value;
+    if (key === "peso") meta.weight = value;
+    if (key === "dano") meta.damage = value;
+    if (key === "tipodano") meta.damageType = value;
+    if (key === "alcance") meta.range = value;
+    if (key === "alcancetipo") meta.rangeType = value;
+    if (key === "propriedades") meta.properties = value;
+    if (key === "dominio") meta.mastery = value;
+    if (key === "ca") meta.armorBase = Number(value) || value;
+    if (key === "limitedes") meta.dexLimit = value === "" ? "" : Number(value);
+    if (key === "escudo") meta.shieldBonus = Number(value) || value;
+    if (key === "bonusca") meta.bonusCa = Number(value) || 0;
+    if (key === "bonusataque") meta.attackBonus = Number(value) || 0;
+    if (key === "bonusdano") meta.damageBonus = Number(value) || 0;
+    if (key === "furtividade") meta.stealth = value;
+    if (key === "forca") meta.strength = Number(value) || value;
+    if (key === "bonus" || key === "uso") meta.bonus = value;
+    if (key === "defesa") meta.defense = value;
+    if (key === "equipado") meta.equipped = boolFromMeta(value);
+    if (key === "armaempunho") meta.weaponReady = boolFromMeta(value);
+    if (key === "armaduraemuso") meta.armorInUse = boolFromMeta(value);
+    if (key === "escudoemuso") meta.shieldInUse = boolFromMeta(value);
+    if (key === "observacoes") meta.notes = value;
+    if (key === "imagem" || key === "foto" || key === "image") meta.image = value;
+  });
+  return {
+    name: parts[0] || "Item sem nome",
+    meta,
+    description: descriptionParts.join(" - ").trim()
+  };
+}
+
+function parseInventoryItem(raw, sheet = ensureActiveSheet()) {
+  const parsed = parseInventoryLineRich(raw);
   const name = parsed.name;
-  const entry = catalog.inventory.find((item) => normalizeKey(item.name) === normalizeKey(name));
-  const stats = { ...(catalogStats[entry?.name || name] || {}), ...parsed.meta };
+  const isDnd = sheetSystemId(sheet) === "dnd5e";
+  const source = isDnd ? DND_EQUIPMENT_CATALOG : catalog.inventory;
+  const entry = source.find((item) => normalizeKey(item.name) === normalizeKey(name));
+  const baseStats = isDnd ? (DND_EQUIPMENT_BY_NAME[normalizeKey(entry?.name || name)] || {}) : (catalogStats[entry?.name || name] || {});
+  const stats = { ...baseStats, ...parsed.meta };
   return { raw, name: entry?.name || name || "Item sem nome", entry, stats, customDescription: parsed.description };
 }
 
@@ -3808,8 +5166,16 @@ function parseInventoryLine(raw) {
     const value = valueParts.join(":").trim();
     if (key === "tipo") meta.category = value;
     if (key === "volume") meta.volume = value;
+    if (key === "peso") meta.weight = value;
+    if (key === "custo" || key === "preco") meta.cost = value;
     if (key === "dano") meta.damage = value;
     if (key === "alcance") meta.range = value;
+    if (key === "propriedades") meta.properties = value;
+    if (key === "ca") meta.armorBase = Number(value) || value;
+    if (key === "limitedes") meta.dexLimit = value === "" ? "" : Number(value);
+    if (key === "escudo") meta.shieldBonus = Number(value) || value;
+    if (key === "furtividade") meta.stealth = value;
+    if (key === "forca") meta.strength = Number(value) || value;
     if (key === "bonus" || key === "bônus" || key === "uso") meta.bonus = value;
     if (key === "defesa") meta.defense = value;
     if (key === "imagem" || key === "foto" || key === "image") meta.image = value;
@@ -3822,6 +5188,9 @@ function parseInventoryLine(raw) {
 }
 
 function inventoryItemDescription(item) {
+  if (item.entry?.system === "dnd5e" || DND_EQUIPMENT_BY_NAME[normalizeKey(item.name)]) {
+    return item.customDescription || item.stats?.desc || item.entry?.desc || "Equipamento de D&D 5e. Ajuste os campos mecanicos conforme a decisao do mestre.";
+  }
   const details = {
     Revolver: "Arma curta, simples de portar e facil de esconder. Boa para agentes que precisam de defesa rapida sem carregar equipamento pesado.",
     Pistola: "Arma de fogo leve e pratica, indicada para combate a curta e media distancia. Funciona bem como arma secundaria ou de uso discreto.",
@@ -3855,6 +5224,23 @@ function inventoryItemDescription(item) {
 
 function inventoryItemMeta(item) {
   const stats = item.stats || {};
+  if (item.entry?.system === "dnd5e" || DND_EQUIPMENT_BY_NAME[normalizeKey(item.name)]) {
+    return [
+      ["Categoria", dndInventoryCategory(item)],
+      ["Tipo", stats.category || item.entry?.type || "Manual"],
+      ["Qtd.", stats.quantity || 1],
+      ["Peso", stats.weight || "-"],
+      ["Dano", stats.damage || "-"],
+      ["Tipo dano", stats.damageType || "-"],
+      ["Alcance", stats.range || "-"],
+      ["Propriedades", stats.properties || "-"],
+      ["Dominio", stats.mastery || "-"],
+      ["CA", stats.armorBase ? String(stats.armorBase) : "-"],
+      ["Limite DES", stats.dexLimit === "" ? "Sem limite" : stats.dexLimit ?? "-"],
+      ["Escudo", stats.shieldBonus ? `+${stats.shieldBonus} CA` : "-"],
+      ["Bonus", stats.bonus || stats.stealth || "-"]
+    ];
+  }
   return [
     ["Tipo", stats.category || item.entry?.type || "Manual"],
     ["Volume", stats.volume ?? "-"],
@@ -3867,9 +5253,10 @@ function inventoryItemMeta(item) {
 
 function inventoryItemCard(raw, index, sheet = ensureActiveSheet()) {
   const item = parseInventoryItem(raw);
-  const active = inventoryLineActive(raw);
+  const isDnd = sheetSystemId(sheet) === "dnd5e";
+  const active = isDnd ? !!item.stats.equipped : inventoryLineActive(raw);
   return `
-    <article class="inventory-card ${active ? "item-active" : "item-inactive"}">
+    <article class="inventory-card ${isDnd ? "dnd-inventory-card" : ""} ${active ? "item-active" : "item-inactive"}">
       <div class="inventory-photo-wrap">
         ${inventoryItemThumb(item, sheet)}
         <label class="item-image-picker">Trocar imagem <input data-inventory-image="${index}" type="file" accept="image/*" /></label>
@@ -3877,18 +5264,32 @@ function inventoryItemCard(raw, index, sheet = ensureActiveSheet()) {
       <div class="inventory-card-body">
         <div class="inventory-card-head">
           <h3>${escapeHtml(item.name)}</h3>
-          <button type="button" data-inventory-toggle="${index}">${active ? "Desativar" : "Ativar"}</button>
+          ${isDnd ? `<span class="dnd-item-category-pill">${escapeHtml(dndInventoryCategory(item))}</span>` : ""}
+          <button type="button" data-inventory-toggle="${index}">${active ? "Desequipar" : "Equipar"}</button>
+          ${isDnd && isDndWeaponItem(item) ? `<button type="button" data-dnd-equip-action="weapon" data-index="${index}">${item.stats.weaponReady ? "Guardar" : "Arma em punho"}</button>` : ""}
+          ${isDnd && isDndArmorItem(item) ? `<button type="button" data-dnd-equip-action="armor" data-index="${index}">${item.stats.armorInUse ? "Remover armadura" : "Armadura em uso"}</button>` : ""}
+          ${isDnd && isDndShieldItem(item) ? `<button type="button" data-dnd-equip-action="shield" data-index="${index}">${item.stats.shieldInUse ? "Remover escudo" : "Escudo em uso"}</button>` : ""}
           <button type="button" data-inventory-remove="${index}">Remover</button>
         </div>
         <dl class="inventory-meta">
           <div><dt>Estado</dt><dd>${active ? "Ativo" : "Inativo"}</dd></div>
+          ${isDnd ? `<div><dt>Uso</dt><dd>${item.stats.weaponReady ? "Arma em punho" : item.stats.armorInUse ? "Armadura em uso" : item.stats.shieldInUse ? "Escudo em uso" : item.stats.equipped ? "Equipado" : "Guardado"}</dd></div>` : ""}
           ${inventoryItemMeta(item).map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}
         </dl>
         <div class="inventory-edit-grid">
           <label>Tipo <input data-inventory-index="${index}" data-inventory-field="category" value="${escapeAttr(item.stats.category || item.entry?.type || "Manual")}" /></label>
-          <label>Volume <input data-inventory-index="${index}" data-inventory-field="volume" value="${escapeAttr(item.stats.volume ?? "-")}" /></label>
+          ${isDnd ? `<label>Categoria <input data-inventory-index="${index}" data-inventory-field="inventoryCategory" value="${escapeAttr(dndInventoryCategory(item))}" /></label>
+          <label>Quantidade <input data-inventory-index="${index}" data-inventory-field="quantity" type="number" min="1" value="${escapeAttr(item.stats.quantity || 1)}" /></label>` : ""}
+          ${isDnd ? `<label>Subtipo <input data-inventory-index="${index}" data-inventory-field="subtype" value="${escapeAttr(item.stats.subtype || item.entry?.type || "")}" /></label>` : `<label>Volume <input data-inventory-index="${index}" data-inventory-field="volume" value="${escapeAttr(item.stats.volume ?? "-")}" /></label>`}
+          <label>Peso <input data-inventory-index="${index}" data-inventory-field="weight" value="${escapeAttr(item.stats.weight || "")}" /></label>
           <label>Dano <input data-inventory-index="${index}" data-inventory-field="damage" value="${escapeAttr(item.stats.damage || "-")}" /></label>
+          ${isDnd ? `<label>Tipo dano <input data-inventory-index="${index}" data-inventory-field="damageType" value="${escapeAttr(item.stats.damageType || "")}" /></label>` : ""}
           <label>Alcance <input data-inventory-index="${index}" data-inventory-field="range" value="${escapeAttr(item.stats.range || "-")}" /></label>
+          <label>CA <input data-inventory-index="${index}" data-inventory-field="armorBase" value="${escapeAttr(item.stats.armorBase || "")}" /></label>
+          <label>Limite DES <input data-inventory-index="${index}" data-inventory-field="dexLimit" value="${escapeAttr(item.stats.dexLimit ?? "")}" /></label>
+          <label>Escudo <input data-inventory-index="${index}" data-inventory-field="shieldBonus" value="${escapeAttr(item.stats.shieldBonus || "")}" /></label>
+          <label>Propriedades <input data-inventory-index="${index}" data-inventory-field="properties" value="${escapeAttr(item.stats.properties || "")}" /></label>
+          ${isDnd ? `<label>Dominio <input data-inventory-index="${index}" data-inventory-field="mastery" value="${escapeAttr(item.stats.mastery || "")}" /></label>` : ""}
           <label>Bonus <input data-inventory-index="${index}" data-inventory-field="bonus" value="${escapeAttr(item.stats.bonus || item.stats.defense || "-")}" /></label>
           <label>Imagem URL <input data-inventory-index="${index}" data-inventory-field="image" value="${escapeAttr(item.stats.image || "")}" placeholder="Cole uma URL ou envie arquivo" /></label>
         </div>
@@ -3900,7 +5301,7 @@ function inventoryItemCard(raw, index, sheet = ensureActiveSheet()) {
 
 function inventoryItemThumb(item, sheet) {
   const savedImage = sheet?.itemImages?.[inventoryImageKey(item.name)] || item.stats?.image;
-  if (savedImage) {
+  if (savedImage && /^(data:|https?:|blob:|file:)/i.test(String(savedImage))) {
     return `<span class="catalog-thumb photo-thumb custom-photo-thumb" style="background-image:url('${escapeAttr(savedImage)}')"></span>`;
   }
   return catalogThumb(item.entry || { name: item.name, type: "Item" });
@@ -3908,6 +5309,68 @@ function inventoryItemThumb(item, sheet) {
 
 function inventoryImageKey(name) {
   return normalizeKey(name || "item-sem-nome");
+}
+
+function dndCatalogItemsForCategory(category) {
+  return DND_EQUIPMENT_CATALOG.filter((entry) => dndInventoryCategory({ name: entry.name, stats: entry, entry }) === category);
+}
+
+function renderDndInventoryAddPanel() {
+  const categoryOptions = DND_INVENTORY_CATEGORIES.map((category) => `<option value="${escapeAttr(category)}">${escapeHtml(category)}</option>`).join("");
+  const itemOptions = DND_EQUIPMENT_CATALOG
+    .map((entry) => `<option value="${escapeAttr(entry.name)}" data-category="${escapeAttr(dndInventoryCategory({ name: entry.name, stats: entry, entry }))}">${escapeHtml(entry.name)} (${escapeHtml(dndInventoryCategory({ name: entry.name, stats: entry, entry }))})</option>`)
+    .join("");
+  return `
+    <form class="dnd-inventory-add" data-dnd-inventory-add>
+      <label>Categoria
+        <select data-dnd-new-category>${categoryOptions}</select>
+      </label>
+      <label>Item do catalogo
+        <select data-dnd-new-item>${itemOptions}</select>
+      </label>
+      <label>Nome manual
+        <input data-dnd-new-name placeholder="Item personalizado" />
+      </label>
+      <label>Qtd.
+        <input data-dnd-new-quantity type="number" min="1" value="1" />
+      </label>
+      <button type="submit">Adicionar item</button>
+    </form>
+  `;
+}
+
+function renderDndInventorySections(items, sheet) {
+  const parsedItems = items.map((raw, index) => ({ raw, index, item: parseInventoryItem(raw, sheet) }));
+  return DND_INVENTORY_CATEGORIES.map((category) => {
+    const categoryItems = parsedItems.filter(({ item }) => dndInventoryCategory(item) === category);
+    if (!categoryItems.length) return "";
+    return `
+      <section class="dnd-inventory-section">
+        <h3>${escapeHtml(category)}</h3>
+        <div class="inventory-list detailed dnd-inventory-list">
+          ${categoryItems.map(({ raw, index }) => inventoryItemCard(raw, index, sheet)).join("")}
+        </div>
+      </section>
+    `;
+  }).join("") || `<p>Nenhum equipamento cadastrado na ficha.</p>`;
+}
+
+function addDndInventoryItemFromPanel(form) {
+  const sheet = ensureActiveSheet();
+  if (sheetSystemId(sheet) !== "dnd5e") return;
+  const category = form.querySelector("[data-dnd-new-category]")?.value || "Outros";
+  const selectedName = form.querySelector("[data-dnd-new-item]")?.value || "";
+  const manualName = form.querySelector("[data-dnd-new-name]")?.value.trim() || "";
+  const quantity = Math.max(1, Number(form.querySelector("[data-dnd-new-quantity]")?.value) || 1);
+  const entry = DND_EQUIPMENT_CATALOG.find((item) => normalizeKey(item.name) === normalizeKey(manualName || selectedName));
+  const base = entry || { name: manualName || "Item personalizado", category: category === "Armas" ? "Arma" : category, inventoryCategory: category, type: category, desc: "Item personalizado da ficha D&D." };
+  const line = dndInventoryLine({ ...base, quantity, inventoryCategory: category });
+  sheet.inventory = splitLines(sheet.inventory).concat(line).join("\n");
+  syncDndEquipmentEffects(sheet, "add-item");
+  recalculateDerivedStats(sheet, "inventory");
+  console.log("Item adicionado ao inventário", { item: base.name, category });
+  renderAll();
+  queueSheetPatch(sheet, "inventory", 500);
 }
 
 function renderInventoryView() {
@@ -3920,6 +5383,8 @@ function renderInventoryView() {
   }
   const sheet = ensureActiveSheet();
   const items = splitLines(sheet.inventory);
+  const isDnd = sheetSystemId(sheet) === "dnd5e";
+  if (isDnd) console.log("Carregando inventário D&D", { sheet: sheet.id, items: items.length });
   container.innerHTML = `
     ${isMasterMode() && linkedSheets.length ? `
       <div class="inventory-sheet-picker">
@@ -3934,13 +5399,14 @@ function renderInventoryView() {
     ` : ""}
     <div class="inventory-summary">
       <b>${escapeHtml(sheet.name || "Ficha ativa")}</b>
-      <span>${items.length} item(ns) registrados</span>
+      <span>${items.length} item(ns) registrados${isDnd ? " | D&D 5e" : ""}</span>
     </div>
-    ${items.length ? `<div class="inventory-list detailed">${items.map((item, index) => inventoryItemCard(item, index, sheet)).join("")}</div>` : `<p>Nenhum equipamento cadastrado na ficha.</p>`}
+    ${isDnd ? renderDndInventoryAddPanel() : ""}
+    ${isDnd ? renderDndInventorySections(items, sheet) : (items.length ? `<div class="inventory-list detailed">${items.map((item, index) => inventoryItemCard(item, index, sheet)).join("")}</div>` : `<p>Nenhum equipamento cadastrado na ficha.</p>`)}
     <div class="inventory-actions">
       ${isMasterMode() ? `<button type="button" data-refresh-inventory-campaign>Atualizar fichas da campanha</button>` : ""}
       <button type="button" data-tab="fichas">Abrir ficha</button>
-      <button type="button" data-inventory-add>Adicionar pelo catalogo</button>
+      ${isDnd ? "" : `<button type="button" data-inventory-add>Adicionar pelo catalogo</button>`}
       <button type="button" data-save-file>Salvar arquivo</button>
     </div>
   `;
@@ -3958,6 +5424,24 @@ function renderInventoryView() {
   container.querySelectorAll("[data-inventory-toggle]").forEach((button) => {
     button.addEventListener("click", () => toggleInventoryActive(Number(button.dataset.inventoryToggle)));
   });
+  container.querySelectorAll("[data-dnd-equip-action]").forEach((button) => {
+    button.addEventListener("click", () => setDndEquipmentState(Number(button.dataset.index), button.dataset.dndEquipAction));
+  });
+  container.querySelector("[data-dnd-inventory-add]")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    addDndInventoryItemFromPanel(event.currentTarget);
+  });
+  container.querySelector("[data-dnd-new-category]")?.addEventListener("change", (event) => {
+    const select = container.querySelector("[data-dnd-new-item]");
+    if (!select) return;
+    const category = event.currentTarget.value;
+    Array.from(select.options).forEach((option) => {
+      option.hidden = option.dataset.category !== category;
+    });
+    const first = Array.from(select.options).find((option) => !option.hidden);
+    if (first) select.value = first.value;
+  });
+  container.querySelector("[data-dnd-new-category]")?.dispatchEvent(new Event("change"));
   container.querySelectorAll("[data-inventory-field]").forEach((field) => {
     field.addEventListener("input", () => updateInventoryField(Number(field.dataset.inventoryIndex), field.dataset.inventoryField, field.value, false));
     field.addEventListener("change", () => updateInventoryField(Number(field.dataset.inventoryIndex), field.dataset.inventoryField, field.value));
@@ -3973,6 +5457,69 @@ function renderInventoryView() {
       setSyncStatus("Inventarios vinculados atualizados.");
     } catch (error) {
       setSyncStatus(`Nao consegui atualizar inventarios: ${error.message}`, true);
+      window.alert(error.message);
+    }
+  });
+  container.querySelector("[data-tab]")?.addEventListener("click", () => switchTab("fichas"));
+  container.querySelector("[data-save-file]")?.addEventListener("click", saveCurrentFile);
+}
+
+function renderRitualsView() {
+  const container = document.querySelector("#ritualsApp");
+  if (!container) return;
+  const linkedSheets = isMasterMode() ? sheetsLinkedToCampaign(currentCampaign()) : [];
+  if (isMasterMode() && linkedSheets.length) {
+    if (!masterInventorySheetId || !linkedSheets.some((sheet) => sheet.id === masterInventorySheetId)) masterInventorySheetId = linkedSheets[0].id;
+    state.activeSheetId = masterInventorySheetId;
+  }
+  const sheet = ensureActiveSheet();
+  const entries = ritualEntriesForSheet(sheet);
+  const canUse = canUseRituals(sheet);
+  container.innerHTML = `
+    ${isMasterMode() && linkedSheets.length ? `
+      <div class="inventory-sheet-picker">
+        ${linkedSheets.map((linked) => `
+          <button type="button" data-ritual-sheet="${escapeAttr(linked.id)}" class="${linked.id === sheet.id ? "selected" : ""}">
+            <span class="mini-sheet-photo" style="${linked.portrait ? `background-image:url('${escapeAttr(linked.portrait)}')` : ""}">${linked.portrait ? "" : escapeHtml(initials(linked.name || "AG"))}</span>
+            <b>${escapeHtml(linked.name || "Agente")}</b>
+            <small>${escapeHtml(linked.player || "Jogador")} | ${escapeHtml(linked.className || "Sem classe")} | ${escapeHtml(linked.nex || "5%")}</small>
+          </button>
+        `).join("")}
+      </div>
+    ` : ""}
+    <div class="inventory-summary">
+      <b>${escapeHtml(sheet.name || "Ficha ativa")}</b>
+      <span>${canUse ? `${entries.length} ritual(is) | ate ${maxRitualCircle(sheet)} circulo` : "Sem acesso a rituais"}</span>
+    </div>
+    ${canUse ? `
+      ${entries.length ? `<div class="sheet-info-cards rituals-list">${entries.map((entry) => renderSheetInfoCard(entry, "rituals")).join("")}</div>` : `<p class="paper-line-empty">Nenhum ritual cadastrado. Use o catalogo para adicionar rituais liberados pelo NEX.</p>`}
+    ` : `<p class="paper-line-empty">${escapeHtml(emptyCatalogText("rituals"))}</p>`}
+    <div class="inventory-actions">
+      ${isMasterMode() ? `<button type="button" data-refresh-ritual-campaign>Atualizar fichas da campanha</button>` : ""}
+      <button type="button" data-tab="fichas">Abrir ficha</button>
+      <button type="button" data-ritual-add ${canUse ? "" : "disabled"}>Adicionar pelo catalogo</button>
+      <button type="button" data-save-file>Salvar arquivo</button>
+    </div>
+  `;
+  container.querySelectorAll("[data-ritual-sheet]").forEach((button) => {
+    button.addEventListener("click", () => {
+      masterInventorySheetId = button.dataset.ritualSheet;
+      state.activeSheetId = masterInventorySheetId;
+      renderRitualsView();
+      renderCrisisSheet();
+    });
+  });
+  container.querySelectorAll("[data-remove-line]").forEach((button) => {
+    button.addEventListener("click", () => removeSheetLine(button.dataset.removeLine, Number(button.dataset.index)));
+  });
+  container.querySelector("[data-ritual-add]")?.addEventListener("click", () => openCatalog("rituals"));
+  container.querySelector("[data-refresh-ritual-campaign]")?.addEventListener("click", async () => {
+    try {
+      await refreshActiveCampaignFromSupabase({ rerender: false });
+      renderRitualsView();
+      setSyncStatus("Rituais vinculados atualizados.");
+    } catch (error) {
+      setSyncStatus(`Nao consegui atualizar rituais: ${error.message}`, true);
       window.alert(error.message);
     }
   });
@@ -4099,6 +5646,852 @@ function sendChatMessage(text) {
   if (els.chatText) els.chatText.value = "";
   renderChatView();
   save();
+}
+
+function voiceUserId() {
+  const user = currentUser();
+  if (user?.id) return user.id;
+  let id = sessionStorage.getItem("arquivo-voice-client-id");
+  if (!id) {
+    id = crypto.randomUUID();
+    sessionStorage.setItem("arquivo-voice-client-id", id);
+  }
+  return id;
+}
+
+function voiceMeta(extra = {}) {
+  const user = currentUser();
+  return {
+    id: voiceUserId(),
+    username: user?.username || (state.currentMode === "master" ? "Mestre" : "Jogador"),
+    role: state.currentMode === "master" ? "master" : "player",
+    muted: voiceMuted,
+    ...extra
+  };
+}
+
+function setVoiceStatus(message, isAlert = false) {
+  if (!els.voiceStatus) return;
+  els.voiceStatus.textContent = message;
+  els.voiceStatus.classList.toggle("voice-alert", isAlert);
+}
+
+function renderVoicePanel() {
+  if (!els.voiceStatus) return;
+  els.voiceJoin.textContent = voiceJoined ? "Sair da voz" : "Entrar na voz";
+  [els.voiceMute, els.voiceDeafen, els.voiceAttention, els.voiceRequestTalk, els.voiceMonitor].forEach((button) => {
+    if (button) button.disabled = !voiceJoined;
+  });
+  if (els.voiceMute) els.voiceMute.textContent = voiceMuted ? "Desmutar" : "Mute";
+  if (els.voiceDeafen) els.voiceDeafen.textContent = voiceDeafened ? "Ouvir mesa" : "Silenciar mesa";
+  if (els.voiceMonitor) els.voiceMonitor.textContent = voiceMonitoring ? "Parar teste" : "Testar micro";
+  if (els.voiceMicLamp) {
+    els.voiceMicLamp.classList.toggle("off", !voiceJoined);
+    els.voiceMicLamp.classList.toggle("muted", voiceJoined && voiceMuted && !voiceMonitoring);
+    els.voiceMicLamp.classList.toggle("active", voiceJoined && !voiceMuted && !voiceMonitoring);
+    els.voiceMicLamp.classList.toggle("monitoring", voiceJoined && voiceMonitoring);
+    els.voiceMicLamp.title = !voiceJoined ? "Microfone desconectado" : voiceMonitoring ? "Teste de microfone ativo" : voiceMuted ? "Microfone mutado para a mesa" : "Microfone ativo para a mesa";
+  }
+  renderVoiceParticipants();
+}
+
+function renderVoiceParticipants() {
+  if (!els.voiceParticipants) return;
+  const rows = Array.from(voiceParticipants.values());
+  if (!voiceJoined || !rows.length) {
+    els.voiceParticipants.textContent = voiceJoined ? "Aguardando conexoes..." : "Ninguem conectado.";
+    return;
+  }
+  els.voiceParticipants.innerHTML = rows.map((item) => `
+    <span class="${item.role === "master" ? "voice-master" : ""}">
+      <b>${escapeHtml(item.username)}</b>
+      <small>${item.role === "master" ? "mestre" : "jogador"}${item.muted ? " | mute" : ""}</small>
+    </span>
+  `).join("");
+}
+
+function voiceRoomName() {
+  const campaignId = uuidOrNull(currentCampaign()?.id) || "local";
+  const sceneId = currentSceneId();
+  return `voice:${campaignId}:${sceneId}`;
+}
+
+async function toggleVoiceRoom() {
+  if (voiceJoined) {
+    stopVoiceRoom();
+    return;
+  }
+  await startVoiceRoom();
+}
+
+async function startVoiceRoom() {
+  const client = supabaseClient();
+  const user = currentUser();
+  if (!client || !isOnlineUser(user)) {
+    setVoiceStatus("sem servidor", true);
+    window.alert("A voz precisa de login online e Supabase ativo.");
+    return;
+  }
+  if (!navigator.mediaDevices?.getUserMedia) {
+    setVoiceStatus("microfone indisponivel", true);
+    window.alert("Este navegador nao liberou microfone.");
+    return;
+  }
+  try {
+    setVoiceStatus("pedindo microfone...");
+    localVoiceStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: false });
+    voiceJoined = true;
+    voiceMuted = false;
+    voiceDeafened = false;
+    voiceParticipants.set(voiceUserId(), voiceMeta());
+    renderVoicePanel();
+    voiceChannel = client.channel(voiceRoomName(), {
+      config: { broadcast: { self: false }, presence: { key: voiceUserId() } }
+    });
+    voiceChannel
+      .on("broadcast", { event: "signal" }, ({ payload }) => handleVoiceSignal(payload))
+      .on("broadcast", { event: "voice_event" }, ({ payload }) => handleVoiceEvent(payload))
+      .on("presence", { event: "sync" }, syncVoicePresence)
+      .on("presence", { event: "leave" }, ({ key }) => removeVoicePeer(key))
+      .subscribe(async (status, error) => {
+        if (error) {
+          console.error("Erro Realtime", error);
+          setVoiceStatus("erro na voz", true);
+          return;
+        }
+        if (status === "SUBSCRIBED") {
+          await voiceChannel.track(voiceMeta());
+          setVoiceStatus("voz conectada");
+          console.log("[Voz] Sala conectada", voiceRoomName());
+        }
+      });
+  } catch (error) {
+    console.error("[Voz] Falha ao iniciar", error);
+    setVoiceStatus("microfone negado", true);
+    stopVoiceRoom();
+  }
+}
+
+function stopVoiceRoom() {
+  voiceJoined = false;
+  voiceMuted = false;
+  voiceDeafened = false;
+  stopVoiceMonitor(false);
+  voicePeers.forEach((peer) => peer.close());
+  voicePeers.clear();
+  voiceParticipants.clear();
+  localVoiceStream?.getTracks().forEach((track) => track.stop());
+  localVoiceStream = null;
+  if (els.voiceRemoteAudio) els.voiceRemoteAudio.innerHTML = "";
+  const client = supabaseClient();
+  if (client && voiceChannel) client.removeChannel(voiceChannel);
+  voiceChannel = null;
+  setVoiceStatus("desconectado");
+  renderVoicePanel();
+}
+
+function syncVoicePresence() {
+  if (!voiceChannel || !voiceJoined) return;
+  const stateMap = voiceChannel.presenceState();
+  voiceParticipants.clear();
+  Object.entries(stateMap).forEach(([key, entries]) => {
+    const meta = entries?.[0] || {};
+    voiceParticipants.set(key, { id: key, username: meta.username || "Agente", role: meta.role || "player", muted: meta.muted === true });
+  });
+  voiceParticipants.set(voiceUserId(), voiceMeta());
+  renderVoiceParticipants();
+  Array.from(voiceParticipants.keys()).forEach((remoteId) => {
+    if (remoteId !== voiceUserId() && !voicePeers.has(remoteId) && voiceUserId() < remoteId) createVoiceOffer(remoteId);
+  });
+}
+
+function createVoicePeer(remoteId) {
+  if (voicePeers.has(remoteId)) return voicePeers.get(remoteId);
+  const peer = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+  localVoiceStream?.getTracks().forEach((track) => peer.addTrack(track, localVoiceStream));
+  peer.onicecandidate = (event) => {
+    if (event.candidate) sendVoiceSignal(remoteId, { type: "candidate", candidate: event.candidate });
+  };
+  peer.ontrack = (event) => attachRemoteVoice(remoteId, event.streams[0]);
+  peer.onconnectionstatechange = () => {
+    if (["failed", "disconnected", "closed"].includes(peer.connectionState)) removeVoicePeer(remoteId);
+  };
+  voicePeers.set(remoteId, peer);
+  return peer;
+}
+
+async function createVoiceOffer(remoteId) {
+  const peer = createVoicePeer(remoteId);
+  const offer = await peer.createOffer();
+  await peer.setLocalDescription(offer);
+  sendVoiceSignal(remoteId, { type: "offer", sdp: offer });
+}
+
+async function handleVoiceSignal(payload) {
+  if (!payload || payload.to !== voiceUserId() || payload.from === voiceUserId()) return;
+  try {
+    const peer = createVoicePeer(payload.from);
+    if (payload.type === "offer") {
+      await peer.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+      const answer = await peer.createAnswer();
+      await peer.setLocalDescription(answer);
+      sendVoiceSignal(payload.from, { type: "answer", sdp: answer });
+    } else if (payload.type === "answer") {
+      await peer.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+    } else if (payload.type === "candidate" && payload.candidate) {
+      await peer.addIceCandidate(new RTCIceCandidate(payload.candidate));
+    }
+  } catch (error) {
+    console.error("[Voz] Erro de sinalizacao", error);
+    setVoiceStatus("falha na conexao", true);
+  }
+}
+
+function sendVoiceSignal(to, payload) {
+  voiceChannel?.send({
+    type: "broadcast",
+    event: "signal",
+    payload: { ...payload, from: voiceUserId(), to, meta: voiceMeta() }
+  });
+}
+
+function attachRemoteVoice(remoteId, stream) {
+  if (!els.voiceRemoteAudio || !stream) return;
+  let audio = els.voiceRemoteAudio.querySelector(`[data-voice-audio="${selectorEscape(remoteId)}"]`);
+  if (!audio) {
+    audio = document.createElement("audio");
+    audio.dataset.voiceAudio = remoteId;
+    audio.autoplay = true;
+    audio.playsInline = true;
+    els.voiceRemoteAudio.append(audio);
+  }
+  audio.srcObject = stream;
+  audio.muted = voiceDeafened;
+}
+
+function removeVoicePeer(remoteId) {
+  const peer = voicePeers.get(remoteId);
+  if (peer) peer.close();
+  voicePeers.delete(remoteId);
+  voiceParticipants.delete(remoteId);
+  els.voiceRemoteAudio?.querySelector(`[data-voice-audio="${selectorEscape(remoteId)}"]`)?.remove();
+  renderVoiceParticipants();
+}
+
+function toggleVoiceMute() {
+  if (!localVoiceStream) return;
+  if (voiceMonitoring) stopVoiceMonitor(false);
+  voiceMuted = !voiceMuted;
+  localVoiceStream.getAudioTracks().forEach((track) => {
+    track.enabled = !voiceMuted;
+  });
+  voiceChannel?.track(voiceMeta());
+  renderVoicePanel();
+}
+
+function setLocalVoiceEnabled(enabled) {
+  localVoiceStream?.getAudioTracks().forEach((track) => {
+    track.enabled = enabled;
+  });
+}
+
+function createSilentVoiceTrack() {
+  if (silentVoiceTrack) return silentVoiceTrack;
+  const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  const oscillator = audioContext.createOscillator();
+  const destination = audioContext.createMediaStreamDestination();
+  const gain = audioContext.createGain();
+  gain.gain.value = 0;
+  oscillator.connect(gain).connect(destination);
+  oscillator.start();
+  silentVoiceTrack = destination.stream.getAudioTracks()[0];
+  return silentVoiceTrack;
+}
+
+function replaceOutgoingVoiceTrack(track) {
+  voicePeers.forEach((peer) => {
+    const sender = peer.getSenders().find((item) => item.track?.kind === "audio");
+    sender?.replaceTrack(track).catch((error) => console.warn("[Voz] Nao consegui trocar faixa de audio.", error));
+  });
+}
+
+function toggleVoiceMonitor() {
+  if (!localVoiceStream || !voiceJoined) return;
+  if (voiceMonitoring) {
+    stopVoiceMonitor(true);
+    return;
+  }
+  voiceMonitoring = true;
+  voiceMuted = true;
+  const microphoneTrack = localVoiceStream.getAudioTracks()[0];
+  replaceOutgoingVoiceTrack(createSilentVoiceTrack());
+  if (microphoneTrack) microphoneTrack.enabled = true;
+  if (!voiceMonitorAudio) {
+    voiceMonitorAudio = document.createElement("audio");
+    voiceMonitorAudio.autoplay = true;
+    voiceMonitorAudio.playsInline = true;
+  }
+  voiceMonitorAudio.srcObject = localVoiceStream;
+  voiceMonitorAudio.muted = false;
+  voiceMonitorAudio.volume = 0.85;
+  voiceMonitorAudio.play?.().catch((error) => console.warn("[Voz] Teste de microfone aguardando permissao do navegador.", error));
+  voiceChannel?.track(voiceMeta({ muted: true, monitoring: true }));
+  setVoiceStatus("teste de micro ativo", true);
+  renderVoicePanel();
+}
+
+function stopVoiceMonitor(restoreOpenMic = true) {
+  if (!voiceMonitoring && !voiceMonitorAudio) return;
+  voiceMonitoring = false;
+  if (voiceMonitorAudio) {
+    voiceMonitorAudio.pause();
+    voiceMonitorAudio.srcObject = null;
+  }
+  if (restoreOpenMic && localVoiceStream) {
+    voiceMuted = false;
+    const microphoneTrack = localVoiceStream.getAudioTracks()[0];
+    if (microphoneTrack) {
+      microphoneTrack.enabled = true;
+      replaceOutgoingVoiceTrack(microphoneTrack);
+    }
+    voiceChannel?.track(voiceMeta());
+    setVoiceStatus("voz conectada");
+  }
+  renderVoicePanel();
+}
+
+function toggleVoiceDeafen() {
+  voiceDeafened = !voiceDeafened;
+  els.voiceRemoteAudio?.querySelectorAll("audio").forEach((audio) => {
+    audio.muted = voiceDeafened;
+  });
+  renderVoicePanel();
+}
+
+function sendVoiceEvent(kind) {
+  if (!voiceChannel || !voiceJoined) return;
+  const text = kind === "attention" ? "Atencao na mesa" : "Pediu a palavra";
+  voiceChannel.send({ type: "broadcast", event: "voice_event", payload: { kind, text, from: voiceMeta() } });
+  handleVoiceEvent({ kind, text, from: voiceMeta() });
+}
+
+function handleVoiceEvent(payload) {
+  if (!payload?.from) return;
+  const text = `${payload.from.username}: ${payload.text}`;
+  setVoiceStatus(text, true);
+  window.setTimeout(() => setVoiceStatus(voiceJoined ? "voz conectada" : "desconectado"), 2600);
+}
+
+function soundtrackEmbedUrl(url) {
+  const text = String(url || "").trim();
+  if (soundtrackType(text) === "audio") return text;
+  try {
+    const parsed = new URL(text);
+    const origin = window.location.origin && window.location.origin.startsWith("http") ? `&origin=${encodeURIComponent(window.location.origin)}` : "";
+    if (parsed.hostname.includes("youtu.be")) {
+      const id = parsed.pathname.split("/").filter(Boolean)[0];
+      return id ? `https://www.youtube.com/embed/${id}?controls=1&modestbranding=1&playsinline=1&enablejsapi=1${origin}` : "";
+    }
+    if (parsed.hostname.includes("youtube.com")) {
+      const playlist = parsed.searchParams.get("list");
+      if (parsed.pathname.includes("/playlist") && playlist) {
+        return `https://www.youtube.com/embed/videoseries?list=${encodeURIComponent(playlist)}&controls=1&modestbranding=1&playsinline=1&enablejsapi=1${origin}`;
+      }
+      const parts = parsed.pathname.split("/").filter(Boolean);
+      const id = parsed.searchParams.get("v") || (parts[0] === "shorts" ? parts[1] : parts.pop());
+      const list = playlist ? `&list=${encodeURIComponent(playlist)}` : "";
+      return id ? `https://www.youtube.com/embed/${id}?controls=1&modestbranding=1&playsinline=1&enablejsapi=1${list}${origin}` : "";
+    }
+    if (parsed.hostname.includes("spotify.com")) {
+      const path = parsed.pathname.replace(/^\/intl-[^/]+/, "");
+      return `https://open.spotify.com/embed${path}`;
+    }
+  } catch (_) {}
+  return "";
+}
+
+function soundtrackType(url) {
+  const text = String(url || "").toLowerCase();
+  if (text.startsWith("data:audio/") || text.startsWith("blob:")) return "audio";
+  if (/\.(mp3|ogg|wav|m4a|aac|flac)(\?|#|$)/i.test(text)) return "audio";
+  if (text.includes("spotify.com")) return "spotify";
+  if (text.includes("youtu.be") || text.includes("youtube.com")) return "youtube";
+  return "link";
+}
+
+function soundtrackTitle(url) {
+  const type = soundtrackType(url);
+  if (type === "audio") return "Audio direto";
+  if (type === "spotify") return "Spotify";
+  if (type === "youtube") return "YouTube";
+  return "Trilha";
+}
+
+function getSoundtrackVolume(session = currentSession()) {
+  return clamp(Number(session?.soundtrackVolume ?? 70), 0, 100);
+}
+
+function applySoundtrackVolume() {
+  const volume = getSoundtrackVolume();
+  if (els.soundtrackVolume) els.soundtrackVolume.value = String(volume);
+  if (els.soundtrackVolumeValue) els.soundtrackVolumeValue.textContent = `${volume}%`;
+  const audio = document.querySelector("#soundtrackAudio");
+  if (audio) audio.volume = volume / 100;
+}
+
+function updateSoundtrackVolumeHint(type = "") {
+  const directAudio = type === "audio" || type === "effect";
+  const externalOrInactive = !directAudio;
+  const controls = document.querySelector(".soundtrack-controls");
+  const label = document.querySelector(".soundtrack-controls label");
+  if (label) label.textContent = directAudio ? "Volume da mesa" : "Volume para audio direto";
+  if (controls) controls.classList.toggle("provider-controlled", externalOrInactive);
+  if (els.soundtrackVolume) {
+    els.soundtrackVolume.disabled = externalOrInactive;
+    els.soundtrackVolume.title = directAudio
+      ? "Controla o volume deste audio em cada navegador da mesa."
+      : "Spotify e YouTube usam o volume do proprio player. Este controle vale para links diretos de audio.";
+  }
+}
+
+function tryPlaySoundtrackAudio() {
+  const audio = document.querySelector("#soundtrackAudio");
+  if (!audio) return;
+  applySoundtrackVolume();
+  audio.play().catch((error) => {
+    console.info("[Trilha] Navegador bloqueou autoplay. Clique no player para liberar audio da mesa.", error);
+  });
+}
+
+function playGeneratedSoundEffect(effect = "monstro") {
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) {
+    window.alert("Este navegador nao liberou audio sintetico.");
+    return;
+  }
+  const context = new AudioContextClass();
+  const master = context.createGain();
+  const now = context.currentTime;
+  const volume = getSoundtrackVolume() / 100;
+  master.gain.setValueAtTime(Math.max(0.02, volume * 0.75), now);
+  master.connect(context.destination);
+  const closeAt = (seconds) => window.setTimeout(() => context.close?.(), Math.ceil(seconds * 1000) + 250);
+  const oscillator = (type, start, end, duration, gain = 0.35) => {
+    const osc = context.createOscillator();
+    const amp = context.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(start, now);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(20, end), now + duration);
+    amp.gain.setValueAtTime(0.001, now);
+    amp.gain.exponentialRampToValueAtTime(gain, now + 0.03);
+    amp.gain.exponentialRampToValueAtTime(0.001, now + duration);
+    osc.connect(amp).connect(master);
+    osc.start(now);
+    osc.stop(now + duration);
+  };
+  const noise = (duration, gain = 0.22, filterType = "bandpass", frequency = 900) => {
+    const buffer = context.createBuffer(1, context.sampleRate * duration, context.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < data.length; i += 1) data[i] = Math.random() * 2 - 1;
+    const source = context.createBufferSource();
+    const filter = context.createBiquadFilter();
+    const amp = context.createGain();
+    filter.type = filterType;
+    filter.frequency.setValueAtTime(frequency, now);
+    amp.gain.setValueAtTime(0.001, now);
+    amp.gain.exponentialRampToValueAtTime(gain, now + 0.02);
+    amp.gain.exponentialRampToValueAtTime(0.001, now + duration);
+    source.buffer = buffer;
+    source.connect(filter).connect(amp).connect(master);
+    source.start(now);
+    source.stop(now + duration);
+  };
+  if (effect === "susto") {
+    noise(0.55, 0.42, "highpass", 1400);
+    oscillator("sine", 90, 42, 0.7, 0.42);
+    closeAt(0.8);
+    return;
+  }
+  if (effect === "chuva") {
+    noise(2.4, 0.25, "bandpass", 1800);
+    noise(2.4, 0.12, "lowpass", 550);
+    closeAt(2.5);
+    return;
+  }
+  if (effect === "vento") {
+    noise(2.8, 0.28, "lowpass", 420);
+    oscillator("sine", 170, 95, 2.8, 0.08);
+    closeAt(2.9);
+    return;
+  }
+  if (effect === "porta") {
+    oscillator("sawtooth", 170, 55, 1.25, 0.22);
+    noise(1.1, 0.16, "bandpass", 360);
+    closeAt(1.35);
+    return;
+  }
+  if (effect === "vidro") {
+    noise(0.8, 0.34, "highpass", 2600);
+    oscillator("triangle", 2200, 720, 0.75, 0.12);
+    oscillator("triangle", 1450, 520, 0.9, 0.1);
+    closeAt(1);
+    return;
+  }
+  oscillator("sawtooth", 92, 36, 1.8, 0.34);
+  oscillator("square", 58, 28, 1.6, 0.22);
+  noise(1.6, 0.16, "lowpass", 480);
+  closeAt(1.9);
+}
+
+function applySoundtrackCommand(session, active, type) {
+  const command = session?.soundtrackCommand;
+  if (!command?.id || command.id === lastSoundtrackCommandId) return;
+  lastSoundtrackCommandId = command.id;
+  if (command.trackId && active?.id && command.trackId !== active.id) return;
+  if (type === "effect") {
+    if (command.action === "play") playGeneratedSoundEffect(active?.effect || command.effect || "monstro");
+    return;
+  }
+  if (type !== "audio") return;
+  const audio = document.querySelector("#soundtrackAudio");
+  if (!audio) return;
+  if (command.action === "pause") {
+    audio.pause();
+    return;
+  }
+  if (command.action === "play") window.setTimeout(tryPlaySoundtrackAudio, 80);
+}
+
+function sendSoundtrackCommand(action, trackId = "") {
+  const session = currentSession();
+  if (!session) return;
+  const active = session.soundtracks?.find((track) => track.id === trackId) || session.soundtracks?.find((track) => track.active);
+  session.soundtrackCommand = {
+    id: crypto.randomUUID(),
+    action,
+    trackId,
+    effect: active?.effect || "",
+    at: Date.now()
+  };
+  if (action === "play" && active?.type === "effect") playGeneratedSoundEffect(active.effect);
+  else if (action === "play") tryPlaySoundtrackAudio();
+  if (action === "pause") document.querySelector("#soundtrackAudio")?.pause();
+  save();
+}
+
+function setSoundtrackVolume(value, persist = false) {
+  const session = currentSession();
+  if (!session) return;
+  session.soundtrackVolume = clamp(Number(value) || 0, 0, 100);
+  applySoundtrackVolume();
+  if (persist) save();
+}
+
+function renderSoundtracks() {
+  const session = currentSession();
+  if (!els.soundtrackList || !els.soundtrackPlayer || !session) {
+    applySoundtrackVolume();
+    return;
+  }
+  session.soundtracks = Array.isArray(session.soundtracks) ? session.soundtracks : [];
+  session.soundtrackVolume = getSoundtrackVolume(session);
+  const active = session.soundtracks.find((track) => track.active) || session.soundtracks[0];
+  if (active?.embed || active?.url) {
+    const type = active.type || soundtrackType(active.url);
+    const activeTrackId = active.id || active.url || "";
+    const shouldTryAutoplay = ["audio", "effect"].includes(type) && activeTrackId && activeTrackId !== lastSoundtrackTrackId;
+    lastSoundtrackTrackId = activeTrackId;
+    els.soundtrackPlayer.className = `soundtrack-player ${type}`;
+    updateSoundtrackVolumeHint(type);
+    if (type === "audio") {
+      els.soundtrackPlayer.innerHTML = `
+        <div class="soundtrack-audio-card soundtrack-direct-audio">
+          <b>${escapeHtml(active.title || "Audio da mesa")}</b>
+          <span>Este arquivo toca no navegador de cada pessoa da mesa e respeita o volume sincronizado.</span>
+          <audio id="soundtrackAudio" controls preload="metadata" src="${escapeAttr(active.url)}"></audio>
+          <div class="soundtrack-audio-actions">
+            <button type="button" data-soundtrack-command="play">Tocar na mesa</button>
+            <button type="button" data-soundtrack-command="pause">Pausar mesa</button>
+          </div>
+        </div>
+      `;
+      applySoundtrackVolume();
+      const audio = document.querySelector("#soundtrackAudio");
+      audio?.addEventListener("volumechange", () => {
+        const nextVolume = Math.round((audio.volume || 0) * 100);
+        if (nextVolume !== getSoundtrackVolume()) setSoundtrackVolume(nextVolume, true);
+      });
+      if (shouldTryAutoplay) window.setTimeout(tryPlaySoundtrackAudio, 60);
+      applySoundtrackCommand(session, active, type);
+    } else if (type === "effect") {
+      els.soundtrackPlayer.innerHTML = `
+        <div class="soundtrack-audio-card soundtrack-direct-audio">
+          <b>${escapeHtml(active.title || "Efeito sonoro")}</b>
+          <span>Som rapido gerado pelo sistema. Use para monstros, sustos, portas, vidro e clima.</span>
+          <div class="soundtrack-audio-actions">
+            <button type="button" data-soundtrack-command="play">Tocar na mesa</button>
+            <button type="button" data-soundtrack-command="pause">Parar</button>
+          </div>
+        </div>
+      `;
+      applySoundtrackVolume();
+      if (shouldTryAutoplay) window.setTimeout(() => playGeneratedSoundEffect(active.effect || "monstro"), 60);
+      applySoundtrackCommand(session, active, type);
+    } else if (type === "youtube") {
+      els.soundtrackPlayer.innerHTML = `
+        <iframe class="youtube-frame" title="Trilha sonora do YouTube" src="${escapeAttr(active.embed || soundtrackEmbedUrl(active.url))}" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"></iframe>
+        <div class="soundtrack-provider-note">
+          <b>${escapeHtml(active.title || "YouTube embutido")}</b>
+          <span>O YouTube toca dentro do site quando o video permite incorporacao. O volume fica no player do YouTube.</span>
+          <a href="${escapeAttr(active.url)}" target="_blank" rel="noopener noreferrer">Abrir</a>
+        </div>
+      `;
+      applySoundtrackVolume();
+    } else if (type === "spotify") {
+      els.soundtrackPlayer.innerHTML = `
+        <iframe title="Trilha sonora Spotify" src="${escapeAttr(active.embed)}" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"></iframe>
+        <small>Spotify usa o proprio player. O volume geral do site nao altera esse iframe.</small>
+      `;
+      applySoundtrackVolume();
+    } else {
+      els.soundtrackPlayer.innerHTML = `
+        <div class="soundtrack-audio-card">
+          <b>Link da trilha</b>
+          <span>Use um link direto de audio para tocar com volume sincronizado na mesa.</span>
+          <a href="${escapeAttr(active.url)}" target="_blank" rel="noopener noreferrer">Abrir</a>
+        </div>
+      `;
+      applySoundtrackVolume();
+    }
+  } else {
+    els.soundtrackPlayer.className = "soundtrack-player";
+    els.soundtrackPlayer.textContent = "Nenhuma trilha selecionada.";
+    updateSoundtrackVolumeHint("");
+    applySoundtrackVolume();
+  }
+  els.soundtrackList.innerHTML = session.soundtracks.length ? session.soundtracks.map((track) => `
+    <article class="${track.active ? "active" : ""}">
+      <span>${escapeHtml(track.title || soundtrackTitle(track.url) || "Trilha")}</span>
+      <button type="button" data-play-track="${escapeAttr(track.id)}">Tocar</button>
+      <button type="button" data-remove-track="${escapeAttr(track.id)}">Remover</button>
+    </article>
+  `).join("") : `<p>Nenhuma trilha cadastrada.</p>`;
+  renderSoundtrackLibrary();
+}
+
+function soundtrackCategoryLabel(category = "trilha") {
+  return {
+    trilha: "Trilha sonora",
+    ambiente: "Ambiente",
+    monstro: "Monstro",
+    susto: "Susto",
+    npc: "NPC",
+    objeto: "Objeto",
+    outro: "Outro"
+  }[category] || "Trilha sonora";
+}
+
+function addSoundtrack(url, options = {}) {
+  const session = currentSession();
+  if (!session) return;
+  const embed = soundtrackEmbedUrl(url);
+  const type = soundtrackType(url);
+  if (!embed && type !== "link") {
+    window.alert("Use um link valido do YouTube, Spotify ou um audio direto.");
+    return;
+  }
+  session.soundtracks = Array.isArray(session.soundtracks) ? session.soundtracks : [];
+  session.soundtracks.forEach((track) => {
+    track.active = false;
+  });
+  session.soundtracks.push({
+    id: crypto.randomUUID(),
+    url,
+    embed: embed || url,
+    type,
+    title: options.title?.trim() || soundtrackTitle(url),
+    category: options.category || "trilha",
+    source: options.source || "link",
+    fileName: options.fileName || "",
+    active: true
+  });
+  session.soundtrackCommand = { id: crypto.randomUUID(), action: "play", trackId: session.soundtracks.at(-1)?.id || "", at: Date.now() };
+  if (els.soundtrackUrl) els.soundtrackUrl.value = "";
+  renderSoundtracks();
+  save();
+}
+
+function addUploadedSoundtrack(file, options = {}) {
+  const session = currentSession();
+  if (!session || !file) return;
+  if (!file.type.startsWith("audio/")) {
+    window.alert("Escolha um arquivo de audio.");
+    return;
+  }
+  if (file.size > 8 * 1024 * 1024) {
+    window.alert("Esse audio esta grande demais para salvar dentro da ficha da campanha. Use um link direto para arquivos maiores que 8MB.");
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    addSoundtrack(String(reader.result || ""), {
+      ...options,
+      title: options.title?.trim() || file.name.replace(/\.[^.]+$/, ""),
+      source: "upload",
+      fileName: file.name
+    });
+  };
+  reader.onerror = () => window.alert("Nao consegui ler esse arquivo de audio.");
+  reader.readAsDataURL(file);
+}
+
+function addGeneratedSoundtrack(effect, title, category = "monstro") {
+  const session = currentSession();
+  if (!session) return;
+  session.soundtracks = Array.isArray(session.soundtracks) ? session.soundtracks : [];
+  let track = session.soundtracks.find((item) => item.type === "effect" && item.effect === effect && item.title === title);
+  session.soundtracks.forEach((item) => {
+    item.active = false;
+  });
+  if (!track) {
+    track = {
+      id: crypto.randomUUID(),
+      url: `effect:${effect}`,
+      embed: "",
+      type: "effect",
+      effect,
+      title,
+      category,
+      source: "gerado",
+      fileName: "",
+      active: true
+    };
+    session.soundtracks.push(track);
+  } else {
+    track.active = true;
+  }
+  renderSoundtracks();
+  sendSoundtrackCommand("play", track.id);
+}
+
+function playSoundtrack(id) {
+  const session = currentSession();
+  if (!session?.soundtracks) return;
+  session.soundtracks.forEach((track) => {
+    track.active = track.id === id;
+  });
+  renderSoundtracks();
+  sendSoundtrackCommand("play", id);
+}
+
+function removeSoundtrack(id) {
+  const session = currentSession();
+  if (!session?.soundtracks) return;
+  session.soundtracks = session.soundtracks.filter((track) => track.id !== id);
+  if (session.soundtracks[0] && !session.soundtracks.some((track) => track.active)) session.soundtracks[0].active = true;
+  renderSoundtracks();
+  save();
+}
+
+function renderSoundtrackLibrary() {
+  const container = document.querySelector("#soundtrackLibraryApp");
+  if (!container) return;
+  const session = currentSession();
+  if (!session) {
+    container.innerHTML = `<p>Nenhum arquivo ativo.</p>`;
+    return;
+  }
+  session.soundtracks = Array.isArray(session.soundtracks) ? session.soundtracks : [];
+  const categories = ["trilha", "ambiente", "monstro", "susto", "npc", "objeto", "outro"];
+  const categoryOptions = categories.map((category) => `<option value="${category}">${soundtrackCategoryLabel(category)}</option>`).join("");
+  const quickEffects = [
+    ["monstro", "monstro", "Rugido de monstro"],
+    ["susto", "susto", "Susto repentino"],
+    ["ambiente", "chuva", "Chuva distante"],
+    ["ambiente", "vento", "Vento no corredor"],
+    ["objeto", "porta", "Porta rangendo"],
+    ["objeto", "vidro", "Vidro quebrando"]
+  ];
+  container.innerHTML = `
+    <div class="soundtrack-studio-grid">
+      <form class="soundtrack-studio-card" data-soundtrack-link-form>
+        <h3>Adicionar por link</h3>
+        <label>Nome <input data-soundtrack-title type="text" placeholder="Nome da faixa" /></label>
+        <label>Categoria <select data-soundtrack-category>${categoryOptions}</select></label>
+        <label>Link <input data-soundtrack-link type="url" placeholder="YouTube, Spotify ou audio direto .mp3" /></label>
+        <button type="submit">Adicionar link</button>
+      </form>
+      <form class="soundtrack-studio-card" data-soundtrack-upload-form>
+        <h3>Subir audio</h3>
+        <label>Nome <input data-upload-title type="text" placeholder="Nome do som" /></label>
+        <label>Categoria <select data-upload-category>${categoryOptions}</select></label>
+        <label>Arquivo <input data-upload-file type="file" accept="audio/*" /></label>
+        <small>Audios enviados ficam salvos na campanha. Para arquivos grandes, use link direto.</small>
+        <button type="submit">Enviar para mesa</button>
+      </form>
+    </div>
+    <section class="soundtrack-effect-pad">
+      <h3>Sons rapidos de mesa</h3>
+      <div>
+        ${quickEffects.map(([category, effect, title]) => `<button type="button" data-quick-effect="${escapeAttr(effect)}" data-quick-category="${escapeAttr(category)}" data-quick-title="${escapeAttr(title)}">${escapeHtml(title)}</button>`).join("")}
+      </div>
+      <small>Use os botoes para tocar imediatamente na mesa e salvar o efeito na biblioteca da sessao.</small>
+    </section>
+    <section class="soundtrack-library-list">
+      <h3>Biblioteca da sessao</h3>
+      ${session.soundtracks.length ? categories.map((category) => {
+        const tracks = session.soundtracks.filter((track) => (track.category || "trilha") === category);
+        if (!tracks.length) return "";
+        return `
+          <div class="soundtrack-category">
+            <h4>${soundtrackCategoryLabel(category)}</h4>
+            ${tracks.map((track) => `
+              <article class="${track.active ? "active" : ""}">
+                <div>
+                  <b>${escapeHtml(track.title || soundtrackTitle(track.url))}</b>
+                  <small>${escapeHtml(track.source === "upload" ? `Upload: ${track.fileName || "audio"}` : track.type || soundtrackType(track.url))}</small>
+                </div>
+                <button type="button" data-library-play="${escapeAttr(track.id)}">Tocar</button>
+                <button type="button" data-library-remove="${escapeAttr(track.id)}">Remover</button>
+              </article>
+            `).join("")}
+          </div>
+        `;
+      }).join("") : `<p>Nenhuma trilha cadastrada.</p>`}
+    </section>
+  `;
+  container.querySelector("[data-soundtrack-link-form]")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const url = form.querySelector("[data-soundtrack-link]")?.value || "";
+    addSoundtrack(url, {
+      title: form.querySelector("[data-soundtrack-title]")?.value || "",
+      category: form.querySelector("[data-soundtrack-category]")?.value || "trilha"
+    });
+  });
+  container.querySelector("[data-soundtrack-upload-form]")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    addUploadedSoundtrack(form.querySelector("[data-upload-file]")?.files?.[0], {
+      title: form.querySelector("[data-upload-title]")?.value || "",
+      category: form.querySelector("[data-upload-category]")?.value || "trilha"
+    });
+  });
+  container.querySelectorAll("[data-library-play]").forEach((button) => {
+    button.addEventListener("click", () => playSoundtrack(button.dataset.libraryPlay));
+  });
+  container.querySelectorAll("[data-library-remove]").forEach((button) => {
+    button.addEventListener("click", () => removeSoundtrack(button.dataset.libraryRemove));
+  });
+  container.querySelectorAll("[data-quick-effect]").forEach((button) => {
+    button.addEventListener("click", () => {
+      addGeneratedSoundtrack(
+        button.dataset.quickEffect || "monstro",
+        button.dataset.quickTitle || "Efeito sonoro",
+        button.dataset.quickCategory || "monstro"
+      );
+    });
+  });
 }
 
 function renderCampaignFiles() {
@@ -4370,6 +6763,7 @@ function maxRitualCircle(sheet) {
 }
 
 function canUseRituals(sheet) {
+  if (sheetSystemId(sheet) === "dnd5e") return false;
   const className = normalizeKey(sheet.className);
   const abilityText = normalizeKey(sheet.abilities);
   return className === "ocultista" || abilityText.includes("conjurar ritual") || abilityText.includes("escolhido pelo outro lado");
@@ -4428,11 +6822,119 @@ function inventoryLineActive(raw) {
   return !normalizeKey(raw).includes("inativo");
 }
 
+function serializeInventoryRecord(name, meta = {}, description = "") {
+  const labels = {
+    inventoryCategory: "Categoria",
+    category: "Tipo",
+    subtype: "Subtipo",
+    quantity: "Quantidade",
+    volume: "Volume",
+    weight: "Peso",
+    damage: "Dano",
+    damageType: "Tipo dano",
+    range: "Alcance",
+    rangeType: "Alcance tipo",
+    properties: "Propriedades",
+    mastery: "Dominio",
+    armorBase: "CA",
+    dexLimit: "Limite DES",
+    shieldBonus: "Escudo",
+    bonusCa: "Bonus CA",
+    attackBonus: "Bonus ataque",
+    damageBonus: "Bonus dano",
+    equipped: "Equipado",
+    weaponReady: "Arma em punho",
+    armorInUse: "Armadura em uso",
+    shieldInUse: "Escudo em uso",
+    stealth: "Furtividade",
+    strength: "Forca",
+    bonus: "Bonus",
+    defense: "Defesa",
+    notes: "Observacoes",
+    image: "Imagem"
+  };
+  const metaText = Object.entries(meta)
+    .filter(([key, value]) => labels[key] && value !== undefined && value !== null && String(value).trim() !== "" && String(value) !== "false")
+    .map(([key, value]) => `${labels[key] || key}: ${typeof value === "boolean" ? (value ? "sim" : "nao") : value}`)
+    .join(" | ");
+  return `${name || "Item sem nome"}${metaText ? ` | ${metaText}` : ""}${description ? ` - ${description}` : ""}`;
+}
+
+function syncDndEquipmentEffects(sheet, reason = "") {
+  if (!sheet || sheetSystemId(sheet) !== "dnd5e") return;
+  sheet.dnd = { ...(sheet.dnd || {}) };
+  if (sheet.dnd.autoEquipment !== false) {
+    sheet.dnd.equipmentAttacks = dndAttacksFromInventory(sheet);
+    if (!sheet.dnd.manualCa) {
+      sheet.dnd.ca = dndArmorClass(sheet);
+      sheet.defense = sheet.dnd.ca;
+      console.log("CA atualizada por equipamento", { id: sheet.id, ca: sheet.dnd.ca, reason });
+    }
+    console.log("Ataques atualizados por equipamento", { id: sheet.id, reason });
+  }
+  syncSheetToken(sheet);
+}
+
+function setDndEquipmentState(index, action) {
+  try {
+  const sheet = ensureActiveSheet();
+  if (sheetSystemId(sheet) !== "dnd5e") return;
+  const lines = splitLines(sheet.inventory);
+  const target = parseInventoryItem(lines[index] || "", sheet);
+  if (!target.name) return;
+  lines.forEach((raw, lineIndex) => {
+    const parsed = parseInventoryLineRich(raw);
+    const item = parseInventoryItem(raw, sheet);
+    const meta = { ...item.stats, ...parsed.meta };
+    if (action === "weapon" && lineIndex === index) {
+      meta.equipped = true;
+      meta.weaponReady = !target.stats.weaponReady;
+      console.log("Arma em punho definida", { item: target.name, active: meta.weaponReady });
+    }
+    if (action === "armor") {
+      meta.armorInUse = lineIndex === index ? !target.stats.armorInUse : false;
+      if (lineIndex === index) {
+        meta.equipped = meta.armorInUse;
+        console.log("Armadura em uso definida", { item: target.name, active: meta.armorInUse });
+      }
+    }
+    if (action === "shield") {
+      meta.shieldInUse = lineIndex === index ? !target.stats.shieldInUse : false;
+      if (lineIndex === index) {
+        meta.equipped = meta.shieldInUse;
+        console.log("Escudo em uso definido", { item: target.name, active: meta.shieldInUse });
+      }
+    }
+    lines[lineIndex] = serializeInventoryRecord(parsed.name, meta, parsed.description);
+  });
+  sheet.inventory = lines.join("\n");
+  syncDndEquipmentEffects(sheet, action);
+  recalculateDerivedStats(sheet, "inventory");
+  renderAll();
+  queueSheetPatch(sheet, "inventory", 500);
+  } catch (error) {
+    console.error("Erro ao atualizar equipamento", error);
+    if (typeof setSyncStatus === "function") setSyncStatus(`Erro ao atualizar equipamento: ${error.message}`, true);
+  }
+}
+
 function toggleInventoryActive(index) {
   const sheet = ensureActiveSheet();
   const items = splitLines(sheet.inventory);
   const raw = items[index] || "";
   if (!raw) return;
+  if (sheetSystemId(sheet) === "dnd5e") {
+    const parsed = parseInventoryLineRich(raw);
+    const item = parseInventoryItem(raw, sheet);
+    const meta = { ...item.stats, ...parsed.meta, equipped: !item.stats.equipped };
+    items[index] = serializeInventoryRecord(parsed.name, meta, parsed.description);
+    sheet.inventory = items.join("\n");
+    syncDndEquipmentEffects(sheet, "equip-toggle");
+    recalculateDerivedStats(sheet, "inventory");
+    renderAll();
+    queueSheetPatch(sheet, "inventory", 500);
+    return;
+  }
   const active = inventoryLineActive(raw);
   items[index] = active
     ? raw.includes("|") ? `${raw} | Inativo` : `${raw} | Inativo`
@@ -4440,18 +6942,39 @@ function toggleInventoryActive(index) {
   sheet.inventory = items.join("\n");
   recalculateDerivedStats(sheet, "inventory");
   renderAll();
+  queueSheetPatch(sheet, "inventory", 800);
 }
 
 function updateInventoryField(index, field, value, rerender = true) {
   const sheet = ensureActiveSheet();
   const items = splitLines(sheet.inventory);
-  const current = parseInventoryLine(items[index] || "Item sem nome");
+  const current = parseInventoryLineRich(items[index] || "Item sem nome");
   const meta = { ...current.meta, [field]: value };
   const labels = {
     category: "Tipo",
+    inventoryCategory: "Categoria",
+    quantity: "Quantidade",
+    subtype: "Subtipo",
     volume: "Volume",
+    weight: "Peso",
     damage: "Dano",
+    damageType: "Tipo dano",
     range: "Alcance",
+    rangeType: "Alcance tipo",
+    properties: "Propriedades",
+    mastery: "Dominio",
+    armorBase: "CA",
+    dexLimit: "Limite DES",
+    shieldBonus: "Escudo",
+    bonusCa: "Bonus CA",
+    attackBonus: "Bonus ataque",
+    damageBonus: "Bonus dano",
+    equipped: "Equipado",
+    weaponReady: "Arma em punho",
+    armorInUse: "Armadura em uso",
+    shieldInUse: "Escudo em uso",
+    stealth: "Furtividade",
+    strength: "Forca",
     bonus: "Bonus",
     defense: "Defesa",
     image: "Imagem"
@@ -4462,9 +6985,11 @@ function updateInventoryField(index, field, value, rerender = true) {
     .join(" | ");
   items[index] = `${current.name}${metaText ? ` | ${metaText}` : ""}${current.description ? ` - ${current.description}` : ""}`;
   sheet.inventory = items.join("\n");
+  if (sheetSystemId(sheet) === "dnd5e") syncDndEquipmentEffects(sheet, "edit-item");
   recalculateDerivedStats(sheet, "inventory");
   if (rerender) renderAll();
   else save();
+  queueSheetPatch(sheet, "inventory", 800);
 }
 
 function updateInventoryImage(index, file) {
@@ -4481,12 +7006,24 @@ function updateInventoryImage(index, file) {
   reader.addEventListener("load", () => {
     sheet.itemImages[inventoryImageKey(item.name)] = reader.result || "";
     renderAll();
+    queueSheetPatch(sheet, "itemImages", 800);
   });
   reader.readAsDataURL(file);
 }
 
 function recalculateDerivedStats(sheet, changedField = "") {
   if (!sheet) return sheet;
+  if (sheetSystemId(sheet) === "dnd5e") {
+    sheet.dnd = { ...(sheet.dnd || {}) };
+    const derived = dndDerived(sheet);
+    sheet.dnd.ca = derived.ac;
+    sheet.defense = derived.ac;
+    sheet.hp = Number(dndValue(sheet, "pv", sheet.hp || 10)) || 0;
+    sheet.hpMax = Number(dndValue(sheet, "pvMax", sheet.hpMax || derived.maxHpByRule)) || derived.maxHpByRule;
+    sheet.movement = Number(dndValue(sheet, "deslocamento", sheet.movement || 9)) || 9;
+    syncSheetToken(sheet);
+    return sheet;
+  }
   const base = classBaseStats(sheet);
   const itemBonus = inventoryMechanicalBonuses(sheet);
   const nex = parseNex(sheet.nex);
@@ -4724,25 +7261,44 @@ function ensureActiveSheet() {
   const ownedIds = user?.sheetIds || [];
   const campaign = currentCampaign();
   const linkedIds = campaign?.personagens || [];
+  const selectedSheet = state.sheets.find((sheet) => sheet.id === state.activeSheetId);
+  const systemId = state.currentMode === "sheet" && selectedSheet ? sheetSystemId(selectedSheet) : campaignSystemId(campaign);
   let index = state.sheets.findIndex((sheet) => sheet.id === state.activeSheetId);
-  const canUseLinkedSheet = isMasterMode() && index >= 0 && linkedIds.includes(state.sheets[index].id);
-  if (!canUseLinkedSheet && ownedIds.length && (index < 0 || !ownedIds.includes(state.sheets[index].id))) {
-    index = state.sheets.findIndex((sheet) => sheet.id === ownedIds[0]);
+  const activeSheet = index >= 0 ? normalizeSheet(state.sheets[index]) : null;
+  const canUseActive = activeSheet
+    && sheetSystemId(activeSheet) === systemId
+    && (state.currentMode === "sheet" ? ownedIds.includes(activeSheet.id) : (isMasterMode() ? (linkedIds.includes(activeSheet.id) || ownedIds.includes(activeSheet.id)) : ownedIds.includes(activeSheet.id)));
+  if (!canUseActive) index = -1;
+  if (index < 0 && state.currentMode !== "sheet" && isMasterMode() && linkedIds.length) {
+    index = state.sheets.findIndex((sheet) => linkedIds.includes(sheet.id) && sheetSystemId(sheet) === systemId);
   }
-  if (index < 0) index = 0;
-  if (!state.sheets[index]) state.sheets[index] = blankSheet("Novo agente", user?.username || "Local");
+  if (index < 0 && ownedIds.length) {
+    index = state.sheets.findIndex((sheet) => ownedIds.includes(sheet.id) && sheetSystemId(sheet) === systemId);
+  }
+  if (index < 0) {
+    const system = systemFor(systemId);
+    const defaultName = system.id === "dnd5e" ? "Novo aventureiro" : "Novo agente";
+    const sheet = blankSheetForSystem(system.id, defaultName, user?.username || "Local");
+    state.sheets.unshift(sheet);
+    index = 0;
+    if (user) {
+      user.sheetIds = user.sheetIds || [];
+      if (user.sheetIds.length < 5) user.sheetIds.unshift(sheet.id);
+    }
+  }
   state.sheets[index] = normalizeSheet(state.sheets[index]);
   state.activeSheetId = state.sheets[index].id;
   return state.sheets[index];
 }
 
-function activeUserSheet() {
+function activeUserSheet(campaign = currentCampaign()) {
   const user = currentUser();
   if (!user) return null;
   user.sheetIds = user.sheetIds || [];
   if (!user.sheetIds.length) return null;
-  let index = state.sheets.findIndex((sheet) => sheet.id === state.activeSheetId && user.sheetIds.includes(sheet.id));
-  if (index < 0) index = state.sheets.findIndex((sheet) => sheet.id === user.sheetIds[0]);
+  const systemId = campaignSystemId(campaign);
+  let index = state.sheets.findIndex((sheet) => sheet.id === state.activeSheetId && user.sheetIds.includes(sheet.id) && sheetSystemId(sheet) === systemId);
+  if (index < 0) index = state.sheets.findIndex((sheet) => user.sheetIds.includes(sheet.id) && sheetSystemId(sheet) === systemId);
   if (index < 0) return null;
   state.sheets[index] = normalizeSheet(state.sheets[index]);
   state.activeSheetId = state.sheets[index].id;
@@ -4809,7 +7365,12 @@ function parseSkills(sheet) {
 }
 
 function splitLines(text) {
-  return String(text || "").split(/[,;\n]/).map((item) => item.trim()).filter(Boolean);
+  const raw = String(text || "").trim();
+  if (!raw) return [];
+  const newlineItems = raw.split(/\n+/).map((item) => item.trim()).filter(Boolean);
+  if (newlineItems.length > 1) return newlineItems;
+  if (raw.includes(" | ") || raw.includes(" - ")) return [raw];
+  return raw.split(/[,;]/).map((item) => item.trim()).filter(Boolean);
 }
 
 function resizeGrid() {
@@ -5019,8 +7580,8 @@ function renderSheets() {
   const user = currentUser();
   const campaign = currentCampaign();
   const visibleSheets = isMasterMode()
-    ? state.sheets.filter((sheet) => !campaign?.personagens?.length || (campaign.personagens || []).includes(sheet.id))
-    : state.sheets.filter((sheet) => (user?.sheetIds || []).includes(sheet.id));
+    ? state.sheets.filter((sheet) => sheetMatchesCampaign(sheet, campaign) && (!campaign?.personagens?.length || (campaign.personagens || []).includes(sheet.id)))
+    : state.sheets.filter((sheet) => sheetMatchesCampaign(sheet, campaign) && (user?.sheetIds || []).includes(sheet.id));
   visibleSheets.forEach((sheet) => {
     const safeSheet = normalizeSheet(sheet);
     const card = document.createElement("article");
@@ -5173,8 +7734,13 @@ function saveSheet(event) {
 }
 
 function normalizeSheet(sheet) {
+  const system = systemFor(sheet.payload?.sistema_regra || sheet.payload?.sistemaRegra || sheet.sistemaRegra || sheet.sistema_regra || sheet.system || "arquivo");
+  const dnd = sheet.dnd || {};
   return {
     id: sheet.id || crypto.randomUUID(),
+    sistemaRegra: system.id,
+    sistema_regra: system.id,
+    fichaTipo: sheet.fichaTipo || sheet.ficha_tipo || system.ficha,
     portrait: sheet.portrait || "",
     name: sheet.name || "",
     player: sheet.player || "Local",
@@ -5183,17 +7749,17 @@ function normalizeSheet(sheet) {
     pathName: sheet.pathName || "",
     nex: sheet.nex || "",
     rank: sheet.rank || "",
-    movement: numberOr(sheet.movement, 9),
+    movement: numberOr(sheet.movement, dnd.deslocamento || 9),
     peRound: numberOr(sheet.peRound, 1),
     loadLimit: numberOr(sheet.loadLimit, Math.max(1, Number(sheet.str || 1) * 5)),
     currentLoad: numberOr(sheet.currentLoad, 0),
-    hp: numberOr(sheet.hp, 16),
-    hpMax: numberOr(sheet.hpMax, sheet.hp || 16),
+    hp: numberOr(sheet.hp, dnd.pv || 16),
+    hpMax: numberOr(sheet.hpMax, dnd.pvMax || sheet.hp || 16),
     pe: numberOr(sheet.pe, 2),
     peMax: numberOr(sheet.peMax, sheet.pe || 2),
     san: numberOr(sheet.san, 12),
     sanMax: numberOr(sheet.sanMax, sheet.san || 12),
-    defense: numberOr(sheet.defense, sheet.ac || 10),
+    defense: numberOr(sheet.defense, dnd.ca || sheet.ac || 10),
     block: numberOr(sheet.block, 0),
     dodge: numberOr(sheet.dodge, 0),
     agi: attrOr(sheet.agi, sheet.dex ? Math.max(1, Math.round(sheet.dex / 5)) : 1),
@@ -5201,6 +7767,59 @@ function normalizeSheet(sheet) {
     int: attrOr(sheet.int, 1),
     pre: attrOr(sheet.pre, sheet.cha ? Math.max(1, Math.round(sheet.cha / 5)) : 1),
     vig: attrOr(sheet.vig, sheet.con ? Math.max(1, Math.round(sheet.con / 5)) : 1),
+    dnd: {
+      ...dnd,
+      classe: dnd.classe || sheet.className || "",
+      raca: dnd.raca || sheet.role || "Humano",
+      antecedente: dnd.antecedente || "",
+      alinhamento: dnd.alinhamento || "",
+      experiencia: numberOr(dnd.experiencia, 0),
+      nivel: numberOr(dnd.nivel, Number.parseInt(sheet.nex, 10) || 1),
+      forca: numberOr(dnd.forca, 10),
+      destreza: numberOr(dnd.destreza, 10),
+      constituicao: numberOr(dnd.constituicao, 10),
+      inteligencia: numberOr(dnd.inteligencia, 10),
+      sabedoria: numberOr(dnd.sabedoria, 10),
+      carisma: numberOr(dnd.carisma, 10),
+      pv: numberOr(dnd.pv, sheet.hp || 10),
+      pvMax: numberOr(dnd.pvMax, sheet.hpMax || sheet.hp || 10),
+      pvTemporario: numberOr(dnd.pvTemporario, 0),
+      ca: numberOr(dnd.ca, sheet.defense || 10),
+      armorBase: numberOr(dnd.armorBase, 10),
+      dexLimit: dnd.dexLimit ?? "",
+      shieldBonus: numberOr(dnd.shieldBonus, 0),
+      acBonus: numberOr(dnd.acBonus, 0),
+      initiativeBonus: numberOr(dnd.initiativeBonus, 0),
+      deslocamento: numberOr(dnd.deslocamento, sheet.movement || 9),
+      hitDie: numberOr(dnd.hitDie, DND_HIT_DICE[dnd.classe || sheet.className] || 8),
+      hitDiceUsed: numberOr(dnd.hitDiceUsed, 0),
+      deathSuccess: numberOr(dnd.deathSuccess, 0),
+      deathFailure: numberOr(dnd.deathFailure, 0),
+      inspiration: Boolean(dnd.inspiration),
+      proficientSaves: dnd.proficientSaves || {},
+      proficientSkills: dnd.proficientSkills || {},
+      expertiseSkills: dnd.expertiseSkills || {},
+      skillBonus: dnd.skillBonus || {},
+      saveBonus: dnd.saveBonus || {},
+      proficiencias: dnd.proficiencias || sheet.skills || "",
+      equipamentos: dnd.equipamentos || sheet.inventory || "",
+      magias: dnd.magias || sheet.rituals || "",
+      anotacoes: dnd.anotacoes || sheet.notes || "",
+      ataques: dnd.ataques || sheet.attacks || "",
+      tracos: dnd.tracos || sheet.abilities || "",
+      idiomas: dnd.idiomas || "",
+      personalidade: dnd.personalidade || sheet.personality || "",
+      ideais: dnd.ideais || "",
+      vinculos: dnd.vinculos || "",
+      defeitos: dnd.defeitos || "",
+      tesouro: dnd.tesouro || "",
+      spellcastingAbility: dnd.spellcastingAbility || "carisma",
+      spellSaveDcBonus: numberOr(dnd.spellSaveDcBonus, 0),
+      spellAttackBonusExtra: numberOr(dnd.spellAttackBonusExtra, 0),
+      spellSlots: dnd.spellSlots || {},
+      spellSlotsUsed: dnd.spellSlotsUsed || {},
+      magiasPreparadas: dnd.magiasPreparadas || ""
+    },
     skills: sheet.skills || "",
     skillMods: sheet.skillMods || {},
     attacks: sheet.attacks || "",
@@ -5534,8 +8153,10 @@ async function saveCurrentFile() {
 }
 
 function showLogin() {
+  stopVoiceRoom();
   stopGridSync();
   stopRealtimeSync();
+  clearCampaignTheme();
   document.querySelector("#loginScreen")?.classList.remove("hidden");
   document.querySelector("#portalScreen")?.classList.add("hidden");
   document.querySelector("#appShell")?.classList.add("hidden");
@@ -5545,6 +8166,7 @@ function showLogin() {
 function showPortal() {
   stopGridSync();
   stopRealtimeSync();
+  clearCampaignTheme();
   document.querySelector("#loginScreen")?.classList.add("hidden");
   document.querySelector("#portalScreen")?.classList.remove("hidden");
   document.querySelector("#appShell")?.classList.add("hidden");
@@ -5552,8 +8174,30 @@ function showPortal() {
   renderPortal();
 }
 
+function startBackgroundDataLoad(reason = "login") {
+  const user = currentUser();
+  if (backgroundLoadRunning || !supabaseClient() || !isOnlineUser(user)) return;
+  backgroundLoadRunning = true;
+  setSyncStatus("Carregando dados...");
+  window.setTimeout(async () => {
+    try {
+      console.log("[Supabase] Carregamento em segundo plano", { reason, user_id: user.id });
+      await loadOnlineWorkspace();
+      renderPortal();
+      if (!document.querySelector("#appShell")?.classList.contains("hidden")) renderAll();
+      setSyncStatus("Dados carregados.");
+    } catch (error) {
+      console.error("[Supabase] Erro Supabase", { etapa: "carregamento em segundo plano", error });
+      setSyncStatus(`Login feito. Alguns dados ainda nao carregaram: ${error.message}`, true);
+    } finally {
+      backgroundLoadRunning = false;
+    }
+  }, 0);
+}
+
 function showApp(mode = state.currentMode || "player") {
   state.currentMode = mode;
+  applyCampaignTheme();
   document.querySelector("#loginScreen")?.classList.add("hidden");
   document.querySelector("#portalScreen")?.classList.add("hidden");
   document.querySelector("#appShell")?.classList.remove("hidden");
@@ -5569,11 +8213,81 @@ function showApp(mode = state.currentMode || "player") {
     }
   }
   if (mode !== "master" && state.activeTab === "biblioteca") state.activeTab = "mesa";
-  if (mode === "sheet") state.activeTab = ["fichas", "inventario", "anotacoes"].includes(state.activeTab) ? state.activeTab : "fichas";
+  if (mode === "sheet") {
+    const sheetTabs = activeCampaignSystemId() === "dnd5e" ? ["fichas", "inventario", "anotacoes"] : ["fichas", "inventario", "rituais", "anotacoes"];
+    state.activeTab = sheetTabs.includes(state.activeTab) ? state.activeTab : "fichas";
+  }
   renderAll();
   switchTab(state.activeTab || "mesa");
   if (state.activeTab === "mesa") window.setTimeout(fitGridToView, 60);
   updateGridSyncLoop(mode);
+}
+
+function systemOptionsHtml(selected = "arquivo") {
+  const active = normalizeSystemId(selected);
+  return Object.values(RPG_SYSTEMS).map((system) =>
+    `<option value="${system.id}" ${system.id === active ? "selected" : ""}>${escapeHtml(system.nome)}</option>`
+  ).join("");
+}
+
+function renderSystemSelectors() {
+  ["#newCampaignSystem", "#newSheetSystem"].forEach((selector) => {
+    const field = document.querySelector(selector);
+    if (!field) return;
+    const selected = field.value || "arquivo";
+    field.innerHTML = systemOptionsHtml(selected);
+  });
+}
+
+function renderSystemCards() {
+  const container = document.querySelector("#systemCards");
+  if (!container) return;
+  container.innerHTML = Object.values(RPG_SYSTEMS).map((system) => `
+    <article class="orbe-system-card ${system.cardClass}">
+      <div>
+        <span>${escapeHtml(system.abreviacao)}</span>
+        <h3>${escapeHtml(system.nome)}</h3>
+        <p>${escapeHtml(system.desc)}</p>
+      </div>
+      <button type="button" data-select-system="${escapeAttr(system.id)}">Selecionar</button>
+    </article>
+  `).join("");
+  container.querySelectorAll("[data-select-system]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const id = normalizeSystemId(button.dataset.selectSystem);
+      const campaignSelect = document.querySelector("#newCampaignSystem");
+      const sheetSelect = document.querySelector("#newSheetSystem");
+      if (campaignSelect) campaignSelect.value = id;
+      if (sheetSelect) sheetSelect.value = id;
+      setSyncStatus(`Sistema selecionado: ${systemFor(id).nome}.`);
+    });
+  });
+}
+
+function switchPortalPage(page = "inicio") {
+  const safePage = ["inicio", "mesas", "fichas", "sistemas", "biblioteca"].includes(page) ? page : "inicio";
+  state.portalPage = safePage;
+  document.querySelectorAll("[data-portal-page]").forEach((section) => {
+    section.classList.toggle("active", section.dataset.portalPage === safePage);
+  });
+  document.querySelectorAll("[data-portal-page-button]").forEach((button) => {
+    const active = button.dataset.portalPageButton === safePage;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-current", active ? "page" : "false");
+  });
+  const subtitles = {
+    inicio: "Central de Criacao",
+    mesas: "Mesas e campanhas",
+    fichas: "Fichas de personagem",
+    sistemas: "Sistemas de RPG",
+    biblioteca: "Biblioteca do ORBE"
+  };
+  const subtitle = document.querySelector("#portalSubtitle");
+  if (subtitle) subtitle.textContent = subtitles[safePage] || subtitles.inicio;
+}
+
+function renderPortalNavigation() {
+  switchPortalPage(state.portalPage || "inicio");
 }
 
 function renderPortal() {
@@ -5584,6 +8298,9 @@ function renderPortal() {
   const limit = document.querySelector("#sheetLimitInfo");
   const inviteInput = document.querySelector("#inviteCode");
   if (!user) return;
+  renderSystemSelectors();
+  renderSystemCards();
+  renderPortalNavigation();
   const inviteFromHash = new URLSearchParams(window.location.hash.replace(/^#/, "")).get("convite");
   if (inviteInput && inviteFromHash && !inviteInput.value) inviteInput.value = inviteFromHash;
   if (badge) badge.textContent = `${user.username} | ${user.role === "admin" ? "ADM MASTER" : user.role === "master" ? "MESTRE" : "JOGADOR"}`;
@@ -5593,8 +8310,8 @@ function renderPortal() {
     campaigns.innerHTML = visibleCampaigns.length ? visibleCampaigns.map((campaign) => `
       <article class="archive-file-card">
         <b>${escapeHtml(campaign.nome)}</b>
-        <p>Mestre: ${escapeHtml(state.accounts.find((account) => account.id === campaign.mestreId)?.username || "desconhecido")}</p>
-        <span>${campaign.sessoes.length} arquivo(s) | ${campaign.personagens?.length || 0} ficha(s) vinculada(s) | Convite: ${escapeHtml(campaign.inviteCode)}</span>
+        <p>${escapeHtml(systemFor(campaign.sistemaRegra).nome)} | ${campaign.mestreId === user.id || user.role === "admin" ? "Mestre" : "Jogador"}</p>
+        <span>${campaign.sessoes.length} arquivo(s) | ${campaign.personagens?.length || 0} jogador(es) | Convite: ${escapeHtml(campaign.inviteCode)}</span>
         <small>${escapeHtml(campaignSheetNames(campaign) || "Nenhuma ficha vinculada ainda.")}</small>
         <div>
           ${campaign.mestreId === user.id || user.role === "admin" ? `<button type="button" data-portal-open="${escapeAttr(campaign.id)}" data-mode="master">Mestre</button>` : ""}
@@ -5610,7 +8327,7 @@ function renderPortal() {
     sheets.innerHTML = owned.length ? owned.map((sheet) => `
       <article class="archive-file-card">
         <b>${escapeHtml(sheet.name || "Agente")}</b>
-        <p>${escapeHtml(sheet.className || "Sem classe")} | ${escapeHtml(sheet.nex || "5%")}</p>
+        <p>${escapeHtml(systemFor(sheet.sistemaRegra).nome)} | ${escapeHtml(sheet.className || sheet.dnd?.classe || "Sem classe")} | ${escapeHtml(sheet.nex || "5%")}</p>
         <span>${state.activeSheetId === sheet.id ? "Ficha ativa" : `ID de ficha: ${escapeHtml(sheet.id.slice(0, 8))}`}</span>
         <small>${escapeHtml(sheetCampaignNames(sheet.id) || "Nao vinculada a campanha.")}</small>
         <div>
@@ -5743,9 +8460,40 @@ function setSignupError(message) {
 function setServerStatus(online, detail = "") {
   const badge = document.querySelector("#serverStatusBadge");
   if (!badge) return;
+  const panel = badge.closest(".orbe-connection-panel");
+  const detailNode = document.querySelector("#orbeConnectionDetail");
+  panel?.classList.remove("orbe-orb-online", "orbe-orb-loading", "orbe-orb-error");
+  panel?.classList.add(online ? "orbe-orb-online" : "orbe-orb-error");
   badge.classList.toggle("offline", !online);
-  badge.textContent = online ? "Servidor: ON" : "Servidor: OFF";
+  badge.textContent = online ? "ORBE ONLINE" : "Falha na conexao";
+  if (detailNode) detailNode.textContent = online ? "Conexao estavel" : (detail || "Nao foi possivel alcancar o ORBE.");
   if (detail) badge.title = detail;
+}
+
+function setOrbeConnectionState(stateName, message = "") {
+  const panel = document.querySelector(".orbe-connection-panel");
+  const badge = document.querySelector("#serverStatusBadge");
+  const detailNode = document.querySelector("#orbeConnectionDetail");
+  if (!panel || !badge) return;
+  panel.classList.remove("orbe-orb-online", "orbe-orb-loading", "orbe-orb-error");
+  if (stateName === "online" || stateName === "granted") {
+    panel.classList.add("orbe-orb-online");
+    badge.classList.remove("offline");
+    badge.textContent = stateName === "granted" ? "Acesso concedido" : "ORBE ONLINE";
+    if (detailNode) detailNode.textContent = message || "Conexao estavel";
+    return;
+  }
+  if (stateName === "error") {
+    panel.classList.add("orbe-orb-error");
+    badge.classList.add("offline");
+    badge.textContent = "Erro de login";
+    if (detailNode) detailNode.textContent = message || "Verifique usuario, senha ou conexao.";
+    return;
+  }
+  panel.classList.add("orbe-orb-loading");
+  badge.classList.remove("offline");
+  badge.textContent = stateName === "checking" ? "Verificando credenciais..." : "Aguardando acesso";
+  if (detailNode) detailNode.textContent = message || "Conexao com o ORBE em verificacao.";
 }
 
 async function updateServerStatus() {
@@ -5812,24 +8560,107 @@ function hideSignup() {
   document.querySelector("#signupModal")?.classList.add("hidden");
 }
 
+function ensureRitualsTab() {
+  const inventoryTab = document.querySelector('[data-tab="inventario"]');
+  if (inventoryTab && !document.querySelector('[data-tab="rituais"]')) {
+    const ritualTab = document.createElement("button");
+    ritualTab.className = "tab menu-button";
+    ritualTab.dataset.tab = "rituais";
+    ritualTab.type = "button";
+    ritualTab.innerHTML = "<span>✦</span>Rituais";
+    inventoryTab.insertAdjacentElement("afterend", ritualTab);
+  }
+  const inventoryView = document.querySelector("#inventario");
+  if (inventoryView && !document.querySelector("#rituais")) {
+    const view = document.createElement("section");
+    view.id = "rituais";
+    view.className = "view dossier-view";
+    view.innerHTML = `
+      <section class="paper-panel dossier-placeholder">
+        <h2>Rituais</h2>
+        <p>Rituais vinculados diretamente a ficha ativa.</p>
+        <div id="ritualsApp" class="rituals-linked"></div>
+      </section>
+    `;
+    inventoryView.insertAdjacentElement("afterend", view);
+  }
+}
+
+function ensureSoundtrackStudioTab() {
+  const anchorTab = document.querySelector('[data-tab="rituais"]') || document.querySelector('[data-tab="inventario"]');
+  if (anchorTab && !document.querySelector('[data-tab="trilha-sonora"]')) {
+    const tab = document.createElement("button");
+    tab.className = "tab menu-button";
+    tab.dataset.tab = "trilha-sonora";
+    tab.type = "button";
+    tab.innerHTML = "<span>♫</span>Trilha sonora";
+    anchorTab.insertAdjacentElement("afterend", tab);
+  }
+  const anchorView = document.querySelector("#rituais") || document.querySelector("#inventario");
+  if (anchorView && !document.querySelector("#trilha-sonora")) {
+    const view = document.createElement("section");
+    view.id = "trilha-sonora";
+    view.className = "view dossier-view";
+    view.innerHTML = `
+      <section class="paper-panel dossier-placeholder">
+        <h2>Trilha sonora</h2>
+        <p>Biblioteca de musicas, ambiente e efeitos sonoros da sessao.</p>
+        <div id="soundtrackLibraryApp" class="soundtrack-library-app"></div>
+      </section>
+    `;
+    anchorView.insertAdjacentElement("afterend", view);
+  }
+}
+
+function syncSystemTabs() {
+  const isDnd = activeCampaignSystemId() === "dnd5e";
+  const ritualTab = document.querySelector('[data-tab="rituais"]');
+  const ritualView = document.querySelector("#rituais");
+  if (ritualTab) {
+    ritualTab.hidden = isDnd;
+    ritualTab.style.display = isDnd ? "none" : "";
+  }
+  if (ritualView) {
+    ritualView.hidden = isDnd;
+    ritualView.style.display = isDnd ? "none" : "";
+  }
+  if (isDnd && state.activeTab === "rituais") state.activeTab = "inventario";
+  const soundtrackTab = document.querySelector('[data-tab="trilha-sonora"]');
+  const inventoryTab = document.querySelector('[data-tab="inventario"]');
+  if (isDnd && soundtrackTab && inventoryTab && soundtrackTab.previousElementSibling !== inventoryTab) {
+    inventoryTab.insertAdjacentElement("afterend", soundtrackTab);
+  }
+}
+
 function switchTab(tabId) {
+  if (tabId === "rituais" && activeCampaignSystemId() === "dnd5e") tabId = "inventario";
   if (tabId === "biblioteca" && !isMasterMode()) tabId = "mesa";
   state.activeTab = tabId;
+  applyCampaignTheme();
+  syncSystemTabs();
   document.querySelectorAll(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === tabId));
   document.querySelectorAll(".view").forEach((view) => view.classList.toggle("active-view", view.id === tabId));
+  const activeSystem = activeCampaignSystemId();
   document.querySelector("#viewTitle").textContent = {
-    mesa: "Mapa de combate",
-    fichas: "Ficha do agente",
-    inventario: "Inventario",
+    mesa: activeSystem === "dnd5e" ? "Mapa de combate" : "Mapa de combate",
+    fichas: activeSystem === "dnd5e" ? "Ficha do aventureiro" : "Ficha do agente",
+    inventario: activeSystem === "dnd5e" ? "Equipamentos" : "Inventario",
+    rituais: activeSystem === "dnd5e" ? "Magias" : "Rituais",
+    "trilha-sonora": "Trilha sonora",
     anotacoes: "Anotacoes",
     missoes: "Missoes",
     biblioteca: "Arquivos da campanha",
     configuracoes: "Configuracoes",
     dados: "Rolador de dados"
   }[tabId] || "Arquivo";
+  if (tabId === "rituais") renderRitualsView();
+  if (tabId === "trilha-sonora") renderSoundtrackLibrary();
   window.archiveUI?.render(state);
   save();
 }
+
+ensureRitualsTab();
+ensureSoundtrackStudioTab();
 
 document.querySelectorAll("[data-tab]").forEach((tab) => {
   tab.addEventListener("click", () => switchTab(tab.dataset.tab));
@@ -5852,6 +8683,7 @@ loginForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   console.log("Clique em Entrar detectado");
   setAuthError("");
+  setOrbeConnectionState("checking", "Verificando credenciais...");
   try {
     try {
       await loginAccountOnline(document.querySelector("#loginUser").value, document.querySelector("#loginPassword").value);
@@ -5862,9 +8694,12 @@ loginForm?.addEventListener("submit", async (event) => {
       setSyncStatus("Login local ativo. Supabase nao carregou este acesso.", true);
     }
     setAuthError("");
+    setOrbeConnectionState("granted", "Acesso concedido. Abrindo seu portal.");
     showPortal();
+    startBackgroundDataLoad("login");
   } catch (error) {
     console.error("Erro no login", error);
+    setOrbeConnectionState("error", error.message || "Erro de login.");
     setAuthError(error.message || "Nao consegui entrar. Veja o console para detalhes.");
   }
 });
@@ -5915,6 +8750,7 @@ document.querySelector("#signupForm")?.addEventListener("submit", async (event) 
     setSignupError("");
     hideSignup();
     showPortal();
+    startBackgroundDataLoad("criar_acesso");
   } catch (error) {
     setSignupError(error.message);
   }
@@ -5933,12 +8769,14 @@ document.querySelector("#inviteAccess")?.addEventListener("click", async () => {
     if (code) await joinCampaignWithInvite(code);
     setAuthError("");
     showPortal();
+    startBackgroundDataLoad("convite");
   } catch (error) {
     setAuthError(`${error.message} Para entrar com convite, faca login ou crie acesso com email.`);
   }
 });
 
 document.querySelector("#logoutButton")?.addEventListener("click", () => {
+  stopVoiceRoom();
   supabaseClient()?.auth?.signOut?.();
   state.currentUserId = null;
   try {
@@ -5954,6 +8792,12 @@ document.querySelector("#backPortal")?.addEventListener("click", () => {
   showPortal();
 });
 
+document.querySelectorAll("[data-portal-page-button], [data-portal-page-link]").forEach((button) => {
+  button.addEventListener("click", () => {
+    switchPortalPage(button.dataset.portalPageButton || button.dataset.portalPageLink);
+  });
+});
+
 els.sidebarToggle?.addEventListener("click", () => {
   const shell = document.querySelector("#appShell");
   if (!shell) return;
@@ -5966,9 +8810,13 @@ document.querySelector("#saveFileButton")?.addEventListener("click", saveCurrent
 
 document.querySelector("#createCampaignButton")?.addEventListener("click", async () => {
   try {
-    createCampaignForCurrentUser(document.querySelector("#newCampaignName").value.trim() || "Nova campanha");
+    createCampaignForCurrentUser(
+      document.querySelector("#newCampaignName").value.trim() || "Nova campanha",
+      selectedSystemValue("#newCampaignSystem")
+    );
     save();
     await saveOnlineState();
+    state.portalPage = "mesas";
     renderPortal();
   } catch (error) {
     window.alert(error.message);
@@ -5977,10 +8825,16 @@ document.querySelector("#createCampaignButton")?.addEventListener("click", async
 
 document.querySelector("#createSheetButton")?.addEventListener("click", async () => {
   try {
-    createSheetForCurrentUser(document.querySelector("#newSheetName").value.trim() || "Novo agente");
+    const systemId = selectedSystemValue("#newSheetSystem");
+    const defaultName = systemId === "dnd5e" ? "Novo aventureiro" : "Novo agente";
+    createSheetForCurrentUser(
+      document.querySelector("#newSheetName").value.trim() || defaultName,
+      systemId
+    );
     save();
     await saveOnlineState();
     state.activeTab = "fichas";
+    state.portalPage = "fichas";
     showApp("sheet");
   } catch (error) {
     window.alert(error.message);
@@ -5991,6 +8845,7 @@ document.querySelector("#joinCampaignButton")?.addEventListener("click", async (
   try {
     await joinCampaignWithInvite(document.querySelector("#inviteCode").value);
     save();
+    state.portalPage = "mesas";
     renderPortal();
   } catch (error) {
     window.alert(error.message);
@@ -6278,6 +9133,35 @@ els.chatForm?.addEventListener("submit", (event) => {
   event.preventDefault();
   sendChatMessage(els.chatText?.value || "");
 });
+els.voiceJoin?.addEventListener("click", toggleVoiceRoom);
+els.voiceMute?.addEventListener("click", toggleVoiceMute);
+els.voiceDeafen?.addEventListener("click", toggleVoiceDeafen);
+els.voiceAttention?.addEventListener("click", () => sendVoiceEvent("attention"));
+els.voiceRequestTalk?.addEventListener("click", () => sendVoiceEvent("request_talk"));
+els.voiceMonitor?.addEventListener("click", toggleVoiceMonitor);
+els.soundtrackForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  addSoundtrack(els.soundtrackUrl?.value || "");
+});
+els.soundtrackVolume?.addEventListener("input", () => {
+  setSoundtrackVolume(els.soundtrackVolume.value, false);
+});
+els.soundtrackVolume?.addEventListener("change", () => {
+  setSoundtrackVolume(els.soundtrackVolume.value, true);
+});
+els.soundtrackList?.addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (!button) return;
+  if (button.dataset.playTrack) playSoundtrack(button.dataset.playTrack);
+  if (button.dataset.removeTrack) removeSoundtrack(button.dataset.removeTrack);
+});
+els.soundtrackPlayer?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-soundtrack-command]");
+  if (!button) return;
+  const session = currentSession();
+  const active = session?.soundtracks?.find((track) => track.active) || session?.soundtracks?.[0];
+  sendSoundtrackCommand(button.dataset.soundtrackCommand, active?.id || "");
+});
 document.querySelector("#newSheet").addEventListener("click", clearSheetForm);
 document.querySelector("#rollDice")?.addEventListener("click", () => performRoll(document.querySelector("#diceFormula")?.value || currentRollFormula()));
 document.querySelector("#quickRoll")?.addEventListener("click", () => performRoll(document.querySelector("#quickFormula")?.value || currentRollFormula()));
@@ -6310,20 +9194,12 @@ async function bootApp() {
   load();
   if (state.activeTab === "configuracoes") state.activeTab = "mesa";
   if (!document.getElementById(state.activeTab)) state.activeTab = "mesa";
-  const client = supabaseClient();
   await updateServerStatus();
-  if (client) {
-    try {
-      if (state.currentUserId && currentUser()) {
-        await loadOnlineWorkspace();
-      }
-    } catch (error) {
-      setSyncStatus(`Nao consegui restaurar sessao online: ${error.message}`, true);
-    }
-  }
   renderAll();
-  if (state.currentUserId && currentUser()) showPortal();
-  else showLogin();
+  if (state.currentUserId && currentUser()) {
+    showPortal();
+    startBackgroundDataLoad("sessao_salva");
+  } else showLogin();
 }
 
 window.addEventListener("error", (event) => {
