@@ -113,6 +113,28 @@ create table if not exists public.grid_tokens (
   updated_at timestamptz default now()
 );
 
+create table if not exists public.campanha_jogadores (
+  id uuid primary key default gen_random_uuid(),
+  campanha_id uuid references public.campanhas(id) on delete cascade,
+  user_id uuid references public.usuarios(id) on delete cascade,
+  role text default 'jogador',
+  status text default 'ativo',
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  unique (campanha_id, user_id)
+);
+
+create table if not exists public.ficha_solicitacoes (
+  id uuid primary key default gen_random_uuid(),
+  campanha_id uuid references public.campanhas(id) on delete cascade,
+  personagem_id uuid references public.personagens(id) on delete cascade,
+  user_id uuid references public.usuarios(id) on delete cascade,
+  status text default 'pendente',
+  created_at timestamptz default now(),
+  reviewed_by uuid,
+  reviewed_at timestamptz
+);
+
 alter table public.campanhas add column if not exists owner_id uuid;
 alter table public.campanhas add column if not exists mestre_id uuid;
 alter table public.campanhas add column if not exists nome text;
@@ -217,16 +239,38 @@ alter table public.grid_tokens add column if not exists payload jsonb default '{
 alter table public.grid_tokens add column if not exists created_at timestamptz default now();
 alter table public.grid_tokens add column if not exists updated_at timestamptz default now();
 
+alter table public.campanha_jogadores add column if not exists campanha_id uuid;
+alter table public.campanha_jogadores add column if not exists user_id uuid;
+alter table public.campanha_jogadores add column if not exists role text default 'jogador';
+alter table public.campanha_jogadores add column if not exists status text default 'ativo';
+alter table public.campanha_jogadores add column if not exists created_at timestamptz default now();
+alter table public.campanha_jogadores add column if not exists updated_at timestamptz default now();
+
+alter table public.ficha_solicitacoes add column if not exists campanha_id uuid;
+alter table public.ficha_solicitacoes add column if not exists personagem_id uuid;
+alter table public.ficha_solicitacoes add column if not exists user_id uuid;
+alter table public.ficha_solicitacoes add column if not exists status text default 'pendente';
+alter table public.ficha_solicitacoes add column if not exists created_at timestamptz default now();
+alter table public.ficha_solicitacoes add column if not exists reviewed_by uuid;
+alter table public.ficha_solicitacoes add column if not exists reviewed_at timestamptz;
+
 create index if not exists grid_tokens_campanha_cena_idx on public.grid_tokens (campanha_id, cena_id);
 create index if not exists grid_tokens_personagem_idx on public.grid_tokens (personagem_id);
 create index if not exists personagens_campanha_idx on public.personagens (campanha_id);
 create index if not exists personagens_responsavel_idx on public.personagens (responsavel_id);
 create index if not exists personagens_owner_idx on public.personagens (owner_id);
 create index if not exists inventario_campanha_personagem_idx on public.inventario (campanha_id, personagem_id);
+create index if not exists campanha_jogadores_campanha_idx on public.campanha_jogadores (campanha_id);
+create index if not exists campanha_jogadores_user_idx on public.campanha_jogadores (user_id);
+create unique index if not exists campanha_jogadores_unique_idx on public.campanha_jogadores (campanha_id, user_id);
+create index if not exists ficha_solicitacoes_campanha_status_idx on public.ficha_solicitacoes (campanha_id, status);
+create index if not exists ficha_solicitacoes_user_idx on public.ficha_solicitacoes (user_id);
 
 alter table public.grid_tokens replica identity full;
 alter table public.personagens replica identity full;
 alter table public.campanhas replica identity full;
+alter table public.campanha_jogadores replica identity full;
+alter table public.ficha_solicitacoes replica identity full;
 
 do $$
 begin
@@ -247,5 +291,17 @@ begin
     where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'campanhas'
   ) then
     alter publication supabase_realtime add table public.campanhas;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'campanha_jogadores'
+  ) then
+    alter publication supabase_realtime add table public.campanha_jogadores;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'ficha_solicitacoes'
+  ) then
+    alter publication supabase_realtime add table public.ficha_solicitacoes;
   end if;
 end $$;

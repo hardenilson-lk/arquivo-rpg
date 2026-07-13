@@ -1790,6 +1790,127 @@ label {
   cursor: not-allowed;
   opacity: .72;
 }
+
+.table-sheets-panel {
+  margin: 0 auto 18px;
+  max-width: min(1180px, 100%);
+  padding: 18px;
+}
+
+.table-sheets-panel:empty {
+  display: none;
+}
+
+.table-sheets-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+  border-bottom: 1px dashed rgba(70, 49, 34, .42);
+  padding-bottom: 12px;
+}
+
+.table-sheets-head h2,
+.table-sheet-block h3 {
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.table-sheet-block {
+  border: 1px solid rgba(70, 49, 34, .38);
+  background: rgba(255, 246, 219, .32);
+  padding: 12px;
+  margin-top: 12px;
+}
+
+.table-sheet-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+
+.table-sheet-form label {
+  display: grid;
+  gap: 4px;
+  font-weight: 900;
+  text-transform: uppercase;
+  font-size: .78rem;
+}
+
+.table-sheet-form input,
+.table-sheet-form select,
+.inline-migration-box select {
+  width: 100%;
+}
+
+.table-sheet-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.table-sheet-card {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  gap: 12px;
+  border: 1px solid rgba(70, 49, 34, .34);
+  background: rgba(244, 222, 170, .35);
+  padding: 12px;
+}
+
+.table-sheet-card.compact {
+  grid-template-columns: minmax(180px, 1fr) auto;
+}
+
+.table-sheet-card b,
+.table-sheet-card span,
+.table-sheet-card small {
+  display: block;
+}
+
+.table-sheet-card small {
+  color: #5b4632;
+  margin-top: 3px;
+}
+
+.table-sheet-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.inline-migration-box {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto auto;
+  gap: 8px;
+  align-items: end;
+  border-top: 1px dashed rgba(70, 49, 34, .42);
+  padding-top: 10px;
+}
+
+.inline-migration-box label {
+  font-weight: 900;
+  text-transform: uppercase;
+  font-size: .78rem;
+}
+
+@media (max-width: 920px) {
+  .table-sheet-form,
+  .table-sheet-card,
+  .table-sheet-card.compact,
+  .inline-migration-box {
+    grid-template-columns: 1fr;
+  }
+
+  .table-sheet-actions {
+    justify-content: flex-start;
+  }
+}
 .preset-row {
   display: grid;
   grid-template-columns: repeat(7, minmax(54px, 1fr));
