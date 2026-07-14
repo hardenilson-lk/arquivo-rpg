@@ -3260,6 +3260,7 @@ function syncCurrentSession() {
 
 function renderAll() {
   applyCampaignTheme();
+  preferAssignedSessionSheetForPlayer();
   renderControls();
   syncSystemTabs();
   renderGrid();
@@ -4064,7 +4065,7 @@ function renderMasterShield() {
             <div class="shield-shortcuts">
               <button type="button" data-shield-open-sheet="${escapeAttr(sheet.id)}">Ficha</button>
               <button type="button" data-shield-open-inventory="${escapeAttr(sheet.id)}">Inventario</button>
-              ${isMasterMode() && sessionSheet ? `<button type="button" data-session-sheet-lock="${escapeAttr(sheet.id)}">${sheet.editLocked ? "Liberar edicao" : "Travar edicao"}</button><button type="button" data-session-sheet-migrate="${escapeAttr(sheet.id)}">Migrar para jogador</button>` : ""}
+              ${isMasterMode() && sessionSheet ? `<button type="button" data-session-sheet-lock="${escapeAttr(sheet.id)}">${sheet.editLocked ? "Liberar edicao" : "Travar edicao"}</button>` : ""}
             </div>
           </article>
         `;
@@ -4273,6 +4274,56 @@ async function migrateSessionSheetToPlayer(sheetId, targetUserId = "") {
     setSyncStatus(`Migracao local feita, mas Supabase falhou: ${error.message}`, true);
   }
   state.pendingMigrationSheetId = null;
+  renderAll();
+}
+
+async function saveSessionSheetAsPersonal(sheetId) {
+  const user = currentUser();
+  const campaign = currentCampaign();
+  const sheet = state.sheets.find((item) => item.id === sheetId);
+  if (!user || !campaign || !sheet || sheetOrigin(sheet) !== "sessao") return;
+  const userId = uuidOrNull(user.id);
+  const responsibleIds = [sheet.user_id, sheet.owner_id, sheet.responsavel_id, sheet.userId, sheet.ownerId, sheet.responsavelId].map(uuidOrNull);
+  if (!responsibleIds.includes(userId)) {
+    setSyncStatus("Essa ficha da mesa nao esta atribuida ao seu usuario.", true);
+    return;
+  }
+
+  console.log("Jogador salvando ficha da mesa como pessoal", { ficha_id: sheet.id, user_id: userId, campanha_id: campaign.id });
+  const removedTokens = state.tokens.filter((token) => token.sheetId === sheet.id);
+  state.tokens = state.tokens.filter((token) => token.sheetId !== sheet.id);
+  const session = currentSession();
+  if (session) session.tokens = (session.tokens || []).filter((token) => token.sheetId !== sheet.id);
+  campaign.personagens = (campaign.personagens || []).filter((id) => id !== sheet.id);
+
+  sheet.origem = "jogador";
+  sheet.campanha_id = "";
+  sheet.campanhaId = "";
+  sheet.owner_id = userId;
+  sheet.ownerId = userId;
+  sheet.responsavel_id = userId;
+  sheet.responsavelId = userId;
+  sheet.user_id = userId;
+  sheet.player = user.username || sheet.player || "Jogador";
+  sheet.edit_locked = false;
+  sheet.editLocked = false;
+  sheet.edit_allowed_by_master = true;
+  sheet.editAllowedByMaster = true;
+  sheet.download_allowed = true;
+  sheet.migrada = true;
+  user.sheetIds = mergeUnique([...(user.sheetIds || []), sheet.id]);
+  state.activeSheetId = sheet.id;
+
+  try {
+    await upsertSheetsOnline([sheetDatabaseRow(sheet, user)]);
+    await saveOnlineUser(user);
+    if (uuidOrNull(campaign.id)) await upsertCampaignsOnline([campaignDatabaseRow(campaign, new Date().toISOString(), currentUser())]);
+    await Promise.all(removedTokens.map((token) => deleteGridTokenOnline(token.id)));
+    saveLightSession();
+    setSyncStatus("Ficha salva nas suas fichas pessoais e removida da mesa.");
+  } catch (error) {
+    setSyncStatus(`Ficha salva localmente, mas a sincronizacao falhou: ${error.message}`, true);
+  }
   renderAll();
 }
 
@@ -8101,7 +8152,7 @@ function canEditSheetVitals(sheetId) {
   if (sheet && !canEditSheet(sheet)) return false;
   const user = currentUser();
   if (isMasterMode()) return true;
-  return Boolean(user && (user.sheetIds || []).includes(sheetId));
+  return Boolean(user && sheet && sheetVisibleToCurrentUser(sheet, currentCampaign()));
 }
 
 function canEditSheet(sheet) {
@@ -8285,13 +8336,18 @@ function ensureActiveSheet() {
   const activeSheet = index >= 0 ? normalizeSheet(state.sheets[index]) : null;
   const canUseActive = activeSheet
     && sheetSystemId(activeSheet) === systemId
-    && (state.currentMode === "sheet" ? ownedIds.includes(activeSheet.id) : (isMasterMode() ? (linkedIds.includes(activeSheet.id) || ownedIds.includes(activeSheet.id)) : ownedIds.includes(activeSheet.id)));
+    && (isMasterMode()
+      ? (linkedIds.includes(activeSheet.id) || ownedIds.includes(activeSheet.id) || sheetVisibleToCurrentUser(activeSheet, campaign))
+      : sheetVisibleToCurrentUser(activeSheet, campaign));
   if (!canUseActive) index = -1;
   if (index < 0 && state.currentMode !== "sheet" && isMasterMode() && linkedIds.length) {
     index = state.sheets.findIndex((sheet) => linkedIds.includes(sheet.id) && sheetSystemId(sheet) === systemId);
   }
   if (index < 0 && ownedIds.length) {
     index = state.sheets.findIndex((sheet) => ownedIds.includes(sheet.id) && sheetSystemId(sheet) === systemId);
+  }
+  if (index < 0 && user) {
+    index = state.sheets.findIndex((sheet) => sheetSystemId(sheet) === systemId && sheetVisibleToCurrentUser(sheet, campaign));
   }
   if (index < 0) {
     const system = systemFor(systemId);
@@ -8313,10 +8369,14 @@ function activeUserSheet(campaign = currentCampaign()) {
   const user = currentUser();
   if (!user) return null;
   user.sheetIds = user.sheetIds || [];
-  if (!user.sheetIds.length) return null;
   const systemId = campaignSystemId(campaign);
-  let index = state.sheets.findIndex((sheet) => sheet.id === state.activeSheetId && user.sheetIds.includes(sheet.id) && sheetSystemId(sheet) === systemId);
+  let index = state.sheets.findIndex((sheet) =>
+    sheet.id === state.activeSheetId &&
+    sheetSystemId(sheet) === systemId &&
+    sheetVisibleToCurrentUser(sheet, campaign)
+  );
   if (index < 0) index = state.sheets.findIndex((sheet) => user.sheetIds.includes(sheet.id) && sheetSystemId(sheet) === systemId);
+  if (index < 0) index = state.sheets.findIndex((sheet) => sheetSystemId(sheet) === systemId && sheetVisibleToCurrentUser(sheet, campaign));
   if (index < 0) return null;
   state.sheets[index] = normalizeSheet(state.sheets[index]);
   state.activeSheetId = state.sheets[index].id;
@@ -8333,7 +8393,8 @@ function canControlToken(token) {
   if (!token) return false;
   if (isMasterMode()) return true;
   const user = currentUser();
-  return Boolean(token.sheetId && (user?.sheetIds || []).includes(token.sheetId));
+  const sheet = token.sheetId ? state.sheets.find((item) => item.id === token.sheetId) : null;
+  return Boolean(user && sheet && sheetVisibleToCurrentUser(sheet, currentCampaign()));
 }
 
 function formatBonus(value) {
@@ -8707,6 +8768,27 @@ function sessionSheetTypeLabel(sheet) {
   return sheet.fichaCategoria || sheet.sheetType || sheet.payload?.fichaCategoria || "Personagem da sessao";
 }
 
+function assignedSessionSheetsForUser(campaign = currentCampaign(), user = currentUser()) {
+  if (!campaign || !user) return [];
+  const userId = uuidOrNull(user.id);
+  return sheetsLinkedToCampaign(campaign).filter((sheet) =>
+    sheetOrigin(sheet) === "sessao" &&
+    [sheet.user_id, sheet.owner_id, sheet.responsavel_id, sheet.userId, sheet.ownerId, sheet.responsavelId].map(uuidOrNull).includes(userId)
+  );
+}
+
+function preferAssignedSessionSheetForPlayer() {
+  const user = currentUser();
+  const campaign = currentCampaign();
+  if (!user || !campaign || isMasterMode()) return;
+  if (state.activeTab !== "fichas" && state.currentMode !== "sheet") return;
+  const assigned = assignedSessionSheetsForUser(campaign, user);
+  if (!assigned.length) return;
+  const active = state.sheets.find((sheet) => sheet.id === state.activeSheetId);
+  if (active && sheetCampaignIdValue(active) === campaign.id && sheetVisibleToCurrentUser(active, campaign)) return;
+  state.activeSheetId = assigned[0].id;
+}
+
 function renderTableSheetsPanel() {
   if (!els.tableSheetsPanel) return;
   const campaign = currentCampaign();
@@ -8719,7 +8801,8 @@ function renderTableSheetsPanel() {
   const linkedSheets = sheetsLinkedToCampaign(campaign);
   const sessionSheets = linkedSheets.filter((sheet) => sheetOrigin(sheet) === "sessao");
   console.log("Carregando fichas da sessao", { campanha_id: campaign.id, total: sessionSheets.length });
-  const personalSheets = state.sheets.filter((sheet) => (user.sheetIds || []).includes(sheet.id) && sheetMatchesCampaign(sheet, campaign));
+  const assignedSessionSheets = assignedSessionSheetsForUser(campaign, user);
+  const personalSheets = state.sheets.filter((sheet) => (user.sheetIds || []).includes(sheet.id) && sheetMatchesCampaign(sheet, campaign) && sheetOrigin(sheet) !== "sessao");
   const pendingRequests = (state.sheetRequests || []).filter((item) => item.campanha_id === campaign.id && item.status === "pendente");
   const userRequests = (state.sheetRequests || []).filter((item) => item.campanha_id === campaign.id && item.user_id === user.id);
   const canMaster = isMasterMode();
@@ -8789,7 +8872,6 @@ function renderTableSheetsPanel() {
               <div class="table-sheet-actions">
                 <button type="button" data-table-open-sheet="${escapeAttr(sheet.id)}">Abrir ficha</button>
                 <button type="button" data-session-sheet-lock="${escapeAttr(sheet.id)}">${sheet.editLocked ? "Liberar edicao" : "Travar edicao"}</button>
-                <button type="button" data-session-sheet-migrate="${escapeAttr(sheet.id)}">Migrar para jogador</button>
                 <button type="button" data-change-responsible="${escapeAttr(sheet.id)}">Alterar responsavel</button>
                 <button class="danger-action" type="button" data-remove-session-sheet="${escapeAttr(sheet.id)}">Remover da sessao</button>
               </div>
@@ -8836,12 +8918,31 @@ function renderTableSheetsPanel() {
     <div class="table-sheets-head">
       <div>
         <p class="eyebrow">Mesa atual</p>
-        <h2>Solicitar ficha pronta</h2>
+      <h2>Fichas da mesa</h2>
       </div>
       <button type="button" data-refresh-table-sheets>Atualizar</button>
     </div>
     <section class="table-sheet-block">
-      <h3>Minhas fichas disponiveis</h3>
+      <h3>Fichas atribuidas a voce</h3>
+      <div class="table-sheet-list">
+        ${assignedSessionSheets.length ? assignedSessionSheets.map((sheet) => `
+          <article class="table-sheet-card shared-sheet-card assigned-session-sheet ${sheet.editLocked ? "is-locked" : "is-unlocked"}">
+            <div>
+              <b>${escapeHtml(sheet.name || "Ficha da mesa")}</b>
+              <span>${escapeHtml(systemFor(sheetSystemId(sheet)).nome)} | ${escapeHtml(sessionSheetTypeLabel(sheet))}</span>
+              <small>Arquivo unico sincronizado com o mestre.</small>
+              <small>${sheet.editLocked ? "Edicao bloqueada pelo mestre" : "Edicao liberada pelo mestre"} | Use Abrir ficha para jogar com ela.</small>
+            </div>
+            <div class="table-sheet-actions">
+              <button type="button" data-table-open-sheet="${escapeAttr(sheet.id)}">Abrir ficha</button>
+              <button type="button" data-player-save-session-sheet="${escapeAttr(sheet.id)}">Salvar nas minhas fichas</button>
+            </div>
+          </article>
+        `).join("") : `<p>Nenhuma ficha da mesa foi atribuida ao seu usuario ainda.</p>`}
+      </div>
+    </section>
+    <section class="table-sheet-block">
+      <h3>Minhas fichas pessoais compativeis</h3>
       <div class="table-sheet-list">
         ${personalSheets.length ? personalSheets.map((sheet) => {
           const request = userRequests.find((item) => item.personagem_id === sheet.id);
@@ -8911,6 +9012,9 @@ function attachTableSheetPanelEvents(players = []) {
   });
   root.querySelectorAll("[data-session-sheet-migrate]").forEach((button) => {
     button.addEventListener("click", () => migrateSessionSheetToPlayer(button.dataset.sessionSheetMigrate));
+  });
+  root.querySelectorAll("[data-player-save-session-sheet]").forEach((button) => {
+    button.addEventListener("click", () => saveSessionSheetAsPersonal(button.dataset.playerSaveSessionSheet));
   });
   root.querySelectorAll("[data-confirm-session-migration]").forEach((button) => {
     button.addEventListener("click", () => {
