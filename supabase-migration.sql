@@ -268,12 +268,14 @@ create index if not exists ficha_solicitacoes_user_idx on public.ficha_solicitac
 
 alter table public.grid_tokens replica identity full;
 alter table public.personagens replica identity full;
+alter table public.rolagens replica identity full;
 alter table public.campanhas replica identity full;
 alter table public.campanha_jogadores replica identity full;
 alter table public.ficha_solicitacoes replica identity full;
 
 alter table public.campanha_jogadores enable row level security;
 alter table public.ficha_solicitacoes enable row level security;
+alter table public.rolagens enable row level security;
 
 drop policy if exists "teste_all_campanha_jogadores" on public.campanha_jogadores;
 create policy "teste_all_campanha_jogadores"
@@ -286,6 +288,14 @@ with check (true);
 drop policy if exists "teste_all_ficha_solicitacoes" on public.ficha_solicitacoes;
 create policy "teste_all_ficha_solicitacoes"
 on public.ficha_solicitacoes
+for all
+to anon, authenticated
+using (true)
+with check (true);
+
+drop policy if exists "teste_all_rolagens" on public.rolagens;
+create policy "teste_all_rolagens"
+on public.rolagens
 for all
 to anon, authenticated
 using (true)
@@ -322,5 +332,11 @@ begin
     where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'ficha_solicitacoes'
   ) then
     alter publication supabase_realtime add table public.ficha_solicitacoes;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'rolagens'
+  ) then
+    alter publication supabase_realtime add table public.rolagens;
   end if;
 end $$;
