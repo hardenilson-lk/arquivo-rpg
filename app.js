@@ -2297,42 +2297,49 @@ function upsertLocalCampaign(campaign) {
 
 async function findCampaignByInviteOnline(code) {
   const client = supabaseClient();
-  const clean = normalizeInviteCode(code);
+  const clean = String(code || "").trim().toUpperCase();
+  console.log("Código digitado:", code);
+  console.log("Código normalizado:", clean);
   if (!client || !clean) return null;
-  console.log("[Supabase] Buscando convite", { digitado: code, normalizado: clean });
   setSyncStatus(`Buscando convite ${clean} no Supabase...`);
 
-  const attempts = [
-    { label: "codigo_convite/invite_code", query: () => client.from("campanhas").select("*").or(`codigo_convite.eq.${clean},invite_code.eq.${clean}`).limit(1) },
-    { label: "codigo_convite", query: () => client.from("campanhas").select("*").eq("codigo_convite", clean).limit(1) },
-    { label: "invite_code", query: () => client.from("campanhas").select("*").eq("invite_code", clean).limit(1) },
-    { label: "payload", query: () => client.from("campanhas").select("*").or(`payload->>codigo_convite.eq.${clean},payload->>invite_code.eq.${clean},payload->>inviteCode.eq.${clean}`).limit(1) }
-  ];
-  for (const attempt of attempts) {
-    const { data, error } = await attempt.query();
-    console.log("[Supabase] Resultado da busca de convite", { tentativa: attempt.label, data, error });
-    if (error) console.warn("[Supabase] Busca de convite falhou.", { tentativa: attempt.label, error });
-    if (data?.[0]) {
-      console.log("[Supabase] Campanha encontrada", data[0]);
-      return normalizeCampaignRecord({ ...(data[0].payload || {}), ...data[0], id: data[0].id });
-    }
+  console.log("Buscando por codigo_convite:", clean);
+  const byCodigo = await client
+    .from("campanhas")
+    .select("*")
+    .eq("codigo_convite", clean)
+    .limit(1);
+  console.log("Resultado codigo_convite:", byCodigo.data);
+  if (byCodigo.error) {
+    console.error("[Supabase] Erro Supabase", { table: "campanhas", filtro: "codigo_convite", codigo: clean, error: byCodigo.error });
+    throw new Error(`campanhas: ${remoteErrorMessage(byCodigo.error)}`);
+  }
+  if (byCodigo.data?.[0]) {
+    const campaign = normalizeCampaignRecord({ ...(byCodigo.data[0].payload || {}), ...byCodigo.data[0], id: byCodigo.data[0].id });
+    console.log("Campanha encontrada:", campaign);
+    console.log("ID real da campanha:", campaign.id);
+    return campaign;
   }
 
-  const { data: allRows, error: allError } = await client.from("campanhas").select("*");
-  console.log("[Supabase] Resultado da busca ampla de convite", { codigoDigitado: code, codigoNormalizado: clean, quantidade: allRows?.length || 0, erro: allError });
-  if (!allError && Array.isArray(allRows)) {
-    const payloadMatch = allRows.find((row) => campaignMatchesInvite({ ...(row.payload || {}), ...row }, clean));
-    if (payloadMatch) {
-      console.log("[Supabase] Campanha encontrada", payloadMatch);
-      return normalizeCampaignRecord({ ...(payloadMatch.payload || {}), ...payloadMatch, id: payloadMatch.id });
-    }
-  } else if (allError) {
-    console.error("[Supabase] Erro Supabase", { table: "campanhas", codigoDigitado: code, codigoNormalizado: clean, error: allError });
+  console.log("Buscando por invite_code:", clean);
+  const byInvite = await client
+    .from("campanhas")
+    .select("*")
+    .eq("invite_code", clean)
+    .limit(1);
+  console.log("Resultado invite_code:", byInvite.data);
+  if (byInvite.error) {
+    console.error("[Supabase] Erro Supabase", { table: "campanhas", filtro: "invite_code", codigo: clean, error: byInvite.error });
+    throw new Error(`campanhas: ${remoteErrorMessage(byInvite.error)}`);
+  }
+  if (byInvite.data?.[0]) {
+    const campaign = normalizeCampaignRecord({ ...(byInvite.data[0].payload || {}), ...byInvite.data[0], id: byInvite.data[0].id });
+    console.log("Campanha encontrada:", campaign);
+    console.log("ID real da campanha:", campaign.id);
+    return campaign;
   }
 
-  setSyncStatus(`Convite ${clean} nao encontrado no Supabase.`, true);
-  const row = null;
-  return row ? normalizeCampaignRecord({ ...(row.payload || {}), ...row }) : null;
+  return null;
 }
 
 function campaignLookupFilters(campaign) {
@@ -2916,20 +2923,22 @@ function updateGridSyncLoop(mode = state.currentMode) {
 async function joinCampaignWithInvite(code) {
   const user = currentUser();
   if (!user) throw new Error("Faca login primeiro.");
-  const clean = normalizeInviteCode(code);
+  const clean = String(code || "").trim().toUpperCase();
   if (!clean) throw new Error("Informe o codigo do convite.");
   console.log("Entrando na campanha por convite", { codigo: clean, user_id: user.id });
   const onlineCampaign = await findCampaignByInviteOnline(clean);
-  let campaign = onlineCampaign ? upsertLocalCampaign(onlineCampaign) : state.campaigns.find((item) => campaignMatchesInvite(item, clean));
-  if (!campaign) throw new Error("Convite nao encontrado.");
+  const campaign = onlineCampaign ? upsertLocalCampaign(onlineCampaign) : null;
+  if (!campaign) throw new Error("Convite nao encontrado. Verifique o codigo com o mestre.");
   if (supabaseClient() && !(await campaignExistsInSupabase(campaign.id))) {
     throw new Error("Campanha invalida ou nao encontrada. Recarregue a mesa.");
   }
   console.log("Campanha encontrada:", { id: campaign.id, nome: campaign.nome, codigo: clean });
+  console.log("ID real da campanha:", campaign.id);
   campaign.jogadores = Array.from(new Set([...(campaign.jogadores || []), user.id]));
   user.campaignIds = Array.from(new Set([...(user.campaignIds || []), campaign.id]));
   state.activeCampaignId = campaign.id;
   state.activeSessionId = campaign.sessoes.find((session) => session.visibleToPlayers)?.id || campaign.sessoes[0]?.id;
+  saveLightSession();
   await upsertCampaignPlayerOnline(campaign.id, user.id, "jogador", "ativo");
   console.log("[Supabase] Jogador vinculado a campanha por convite", { campanha_id: campaign.id, usuario: user.username });
   await saveOnlineState();
