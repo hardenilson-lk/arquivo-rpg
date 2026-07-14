@@ -1365,6 +1365,9 @@ function campaignPayloadForSave(campaign) {
   payload.grid_rows = map.rows;
   payload.grid_cols = map.cols;
   payload.active_scene_id = session?.id || state.activeSessionId || "";
+  if (Array.isArray(payload.sessoes)) {
+    payload.sessoes = payload.sessoes.map((item) => ({ ...item, tokens: [] }));
+  }
   return payload;
 }
 
@@ -1912,7 +1915,7 @@ async function reviewSheetRequest(requestId, status) {
       campaign.personagens = mergeUnique([...(campaign.personagens || []), sheet.id]);
       campaign.jogadores = mergeUnique([...(campaign.jogadores || []), request.user_id]);
       await upsertSheetsOnline([sheetDatabaseRow(sheet, { ...user, id: request.user_id })]);
-      seedSessionTokensFromSheets(campaign, currentSession(), { force: true });
+      seedSessionTokensFromSheets(campaign, currentSession(), { force: true, persist: true });
       console.log("Ficha adicionada ao escudo do mestre", { ficha_id: sheet.id, campanha_id: campaign.id });
       }
     } else {
@@ -2575,6 +2578,7 @@ function applyGridTokenRow(row, eventType = "UPDATE") {
   syncedGridTokenIds.add(token.id);
   if (index >= 0) state.tokens[index] = { ...state.tokens[index], ...token };
   else state.tokens.push(token);
+  reconcileGridTokensWithLinkedSheets({ persist: false });
   syncCurrentSession();
   if (index >= 0) updateTokenElement(state.tokens.find((item) => item.id === token.id));
   else renderGrid();
@@ -2621,13 +2625,19 @@ async function loadGridTokensFromSupabase({ seedIfEmpty = true } = {}) {
         if (row.id) syncedGridTokenIds.add(row.id);
       });
       state.tokens = data.map(tokenFromGridRow);
+      reconcileGridTokensWithLinkedSheets({ persist: true });
       syncCurrentSession();
       renderGridSyncUpdate();
       console.log("Grid carregado do Supabase", { campanha_id: campaignId, cena_id: sceneId, tokens: state.tokens.length });
       return;
     }
     console.log("Grid carregado do Supabase", { campanha_id: campaignId, cena_id: sceneId, tokens: 0 });
-    if (seedIfEmpty && state.tokens.length && (campaign?.personagens || []).length) await upsertGridTokens(state.tokens, "full");
+    state.tokens = [];
+    if (seedIfEmpty) {
+      reconcileGridTokensWithLinkedSheets({ persist: true });
+      syncCurrentSession();
+      renderGridSyncUpdate();
+    }
   } finally {
     console.timeEnd("carregar_grid");
   }
@@ -2871,7 +2881,10 @@ function applyRemoteGridCampaign(row) {
   state.campaigns = state.campaigns.map((campaign) => campaign.id === localCampaign.id ? mergedCampaign : campaign);
   state.activeCampaignId = mergedCampaign.id;
   state.activeSessionId = remoteSession.id;
+  const liveTokens = state.tokens.map((token) => ({ ...token }));
   applySessionToTable(remoteSession);
+  state.tokens = liveTokens;
+  reconcileGridTokensWithLinkedSheets({ persist: false });
   syncCurrentSession();
   console.log("Tamanho do grid recebido via Realtime", { rows: state.map.rows, cols: state.map.cols, campanha_id: mergedCampaign.id });
   console.log("Grid redesenhado para jogador");
@@ -2954,7 +2967,7 @@ function linkActiveSheetToCampaign(campaign) {
   const sheet = activeUserSheet(campaign) || createSheetForCurrentUser(defaultName, system.id);
   if (!sheet?.id) throw new Error("Crie ou selecione uma ficha antes de vincular.");
   addActiveSheetToCampaign(campaign, { strict: true });
-  seedSessionTokensFromSheets(campaign, currentSession(), { force: true });
+  seedSessionTokensFromSheets(campaign, currentSession(), { force: true, persist: true });
 }
 
 function addActiveSheetToCampaign(campaign, options = {}) {
@@ -3025,6 +3038,107 @@ function tokenFromSheet(sheet, index = 0) {
   };
 }
 
+function refreshTokenFromSheet(token, sheet) {
+  if (!token || !sheet) return token;
+  const statValue = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
+  token.name = sheet.name || token.name;
+  token.label = sheet.className || token.label || "Personagem";
+  token.portrait = sheet.portrait || "";
+  token.hp = statValue(sheet.hp, token.hp);
+  token.hpMax = statValue(sheet.hpMax, token.hpMax);
+  token.pe = statValue(sheet.pe, token.pe);
+  token.peMax = statValue(sheet.peMax, token.peMax);
+  token.san = statValue(sheet.san, token.san);
+  token.sanMax = statValue(sheet.sanMax, token.sanMax);
+  token.light = statValue(inventoryVisionBonus(sheet), token.light);
+  return token;
+}
+
+function reconcileGridTokensWithLinkedSheets({ persist = false } = {}) {
+  const campaign = currentCampaign();
+  const session = currentSession();
+  if (!campaign || !session) return { added: [], removed: [], changed: [] };
+  const linkedSheets = sheetsLinkedToCampaign(campaign);
+  const linkedById = new Map(linkedSheets.map((sheet) => [sheet.id, sheet]));
+  const seenSheetIds = new Set();
+  const removed = [];
+  const changed = [];
+  const nextTokens = [];
+
+  (state.tokens || []).forEach((token) => {
+    if (!token.sheetId && token.type === "player") {
+      removed.push(token);
+      return;
+    }
+    if (token.sheetId) {
+      const sheet = linkedById.get(token.sheetId);
+      if (!sheet || seenSheetIds.has(token.sheetId)) {
+        removed.push(token);
+        return;
+      }
+      seenSheetIds.add(token.sheetId);
+      const before = JSON.stringify({
+        name: token.name,
+        label: token.label,
+        portrait: token.portrait,
+        hp: token.hp,
+        hpMax: token.hpMax,
+        pe: token.pe,
+        peMax: token.peMax,
+        san: token.san,
+        sanMax: token.sanMax,
+        light: token.light
+      });
+      refreshTokenFromSheet(token, sheet);
+      const after = JSON.stringify({
+        name: token.name,
+        label: token.label,
+        portrait: token.portrait,
+        hp: token.hp,
+        hpMax: token.hpMax,
+        pe: token.pe,
+        peMax: token.peMax,
+        san: token.san,
+        sanMax: token.sanMax,
+        light: token.light
+      });
+      if (before !== after) changed.push(token);
+    }
+    nextTokens.push(token);
+  });
+
+  const occupied = new Set(nextTokens.map((token) => `${token.x},${token.y}`));
+  const added = [];
+  linkedSheets.forEach((sheet, index) => {
+    if (seenSheetIds.has(sheet.id)) return;
+    const token = tokenFromSheet(sheet, index + nextTokens.length);
+    while (occupied.has(`${token.x},${token.y}`)) {
+      token.x = Math.min(state.map.cols - 1, token.x + 1);
+      if (occupied.has(`${token.x},${token.y}`)) token.y = Math.min(state.map.rows - 1, token.y + 1);
+    }
+    occupied.add(`${token.x},${token.y}`);
+    nextTokens.push(token);
+    added.push(token);
+  });
+
+  state.tokens = nextTokens;
+  session.tokens = state.tokens.map((token) => ({ ...token }));
+  if (removed.length || added.length || changed.length) {
+    console.log("[Grid] Tokens reconciliados com fichas da campanha", {
+      campanha_id: campaign.id,
+      cena_id: currentSceneId(),
+      adicionados: added.map((token) => tokenDisplayName(token)),
+      removidos: removed.map((token) => tokenDisplayName(token)),
+      atualizados: changed.map((token) => tokenDisplayName(token))
+    });
+  }
+  if (persist) {
+    removed.forEach((token) => deleteGridTokenOnline(token.id));
+    if (added.length || changed.length) upsertGridTokens([...added, ...changed], "full");
+  }
+  return { added, removed, changed };
+}
+
 function inventoryVisionBonus(sheet) {
   const bonus = inventoryMechanicalBonuses(sheet);
   if (bonus.light) return bonus.light;
@@ -3037,13 +3151,18 @@ function seedSessionTokensFromSheets(campaign, session, options = {}) {
   if (!campaign || !session) return;
   if (!options.force && session.autoSeedSheetTokens !== true) return;
   session.tokens = Array.isArray(session.tokens) ? session.tokens : [];
-  sheetsLinkedToCampaign(campaign).forEach((sheet, index) => {
-    if (!session.tokens.some((token) => token.sheetId === sheet.id)) {
-      session.tokens.push(tokenFromSheet(sheet, index));
-    }
-  });
   if (state.activeSessionId === session.id) {
     state.tokens = session.tokens.map((token) => ({ ...token }));
+    reconcileGridTokensWithLinkedSheets({ persist: options.persist === true });
+  } else {
+    const previousTokens = state.tokens;
+    const previousSessionId = state.activeSessionId;
+    state.activeSessionId = session.id;
+    state.tokens = session.tokens.map((token) => ({ ...token }));
+    reconcileGridTokensWithLinkedSheets({ persist: false });
+    session.tokens = state.tokens.map((token) => ({ ...token }));
+    state.tokens = previousTokens;
+    state.activeSessionId = previousSessionId;
   }
 }
 
@@ -4185,7 +4304,7 @@ async function createSessionSheetFromPanel() {
   if (responsibleId) campaign.jogadores = mergeUnique([...(campaign.jogadores || []), responsibleId]);
   state.activeSheetId = sheet.id;
   masterInventorySheetId = sheet.id;
-  seedSessionTokensFromSheets(campaign, currentSession(), { force: true });
+  seedSessionTokensFromSheets(campaign, currentSession(), { force: true, persist: true });
   try {
     await upsertSheetsOnline([sheetDatabaseRow(sheet, user)]);
     await upsertCampaignPlayerOnline(campaign.id, user.id, "mestre", "ativo");
