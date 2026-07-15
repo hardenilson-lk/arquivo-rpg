@@ -11186,6 +11186,8 @@ document.querySelectorAll("[data-roll]").forEach((button) => {
 });
 
 const PORTAL_LAYOUT_STORAGE_KEY = "orbe.portal.homeLayout.v1";
+const PORTAL_LAYOUT_REMOTE_TABLE = "site_configuracoes";
+const PORTAL_LAYOUT_REMOTE_KEY = "orbe_home_layout";
 const PORTAL_LAYOUT_CUSTOM_KEY = "__customItems";
 const PORTAL_LAYOUT_HANDLE_DIRECTIONS = ["n", "s", "e", "w", "ne", "nw", "se", "sw"];
 
@@ -11223,7 +11225,11 @@ function readPortalLayout() {
 }
 
 function writePortalLayout(layout) {
-  localStorage.setItem(PORTAL_LAYOUT_STORAGE_KEY, JSON.stringify(layout || {}));
+  try {
+    localStorage.setItem(PORTAL_LAYOUT_STORAGE_KEY, JSON.stringify(layout || {}));
+  } catch (error) {
+    console.warn("[Portal] Nao foi possivel salvar o layout local.", error);
+  }
 }
 
 function clonePortalLayout(layout) {
@@ -11339,6 +11345,57 @@ function resetPortalLayoutStyles() {
   if (layer) layer.innerHTML = "";
 }
 
+async function readPortalLayoutRemote() {
+  const client = supabaseClient();
+  if (!client) throw new Error("Supabase indisponivel.");
+  const { data, error } = await client
+    .from(PORTAL_LAYOUT_REMOTE_TABLE)
+    .select("valor")
+    .eq("chave", PORTAL_LAYOUT_REMOTE_KEY)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return data.valor && typeof data.valor === "object" ? data.valor : {};
+}
+
+async function writePortalLayoutRemote(layout) {
+  const client = supabaseClient();
+  if (!client) throw new Error("Supabase indisponivel.");
+  const user = typeof currentUser === "function" ? currentUser() : null;
+  const payload = {
+    chave: PORTAL_LAYOUT_REMOTE_KEY,
+    valor: layout || {},
+    updated_by: user?.id || state.currentUserId || null,
+    updated_at: new Date().toISOString(),
+  };
+  const { error } = await client
+    .from(PORTAL_LAYOUT_REMOTE_TABLE)
+    .upsert(payload, { onConflict: "chave" });
+  if (error) throw error;
+  return payload;
+}
+
+async function syncPortalLayoutFromRemote() {
+  try {
+    const remoteLayout = await readPortalLayoutRemote();
+    if (remoteLayout === null) {
+      console.log("[Portal] Nenhum layout global salvo ainda.");
+      return null;
+    }
+    console.log("[Portal] Layout global carregado.");
+    writePortalLayout(remoteLayout);
+    resetPortalLayoutStyles();
+    applyPortalLayout(remoteLayout);
+    return remoteLayout;
+  } catch (error) {
+    console.warn("[Portal] Nao foi possivel carregar o layout global.", error);
+    if (canEditPortalLayout()) {
+      setPortalLayoutStatus(`Layout local carregado. Global indisponivel: ${error.message || error}`);
+    }
+    return null;
+  }
+}
+
 function removePortalLayoutHandles(target) {
   target?.querySelectorAll(":scope > .layout-resize-handle").forEach((handle) => handle.remove());
 }
@@ -11424,9 +11481,11 @@ function initPortalLayoutEditor() {
   let pendingImageMode = "swap";
   let undoStack = [clonePortalLayout(layout)];
   let redoStack = [];
+  const remoteLayoutPromise = syncPortalLayoutFromRemote();
 
   applyPortalLayout(layout);
-  if (!syncPortalLayoutEditorAccess()) return;
+  const allowed = syncPortalLayoutEditorAccess();
+  if (!allowed) return;
   if (window.__orbePortalLayoutEditorReady) return;
   window.__orbePortalLayoutEditorReady = true;
 
@@ -11651,7 +11710,7 @@ function initPortalLayoutEditor() {
     pushHistory(delta > 0 ? "Elemento trazido para frente." : "Elemento enviado para tras.");
   };
 
-  const clearEverything = () => {
+  const clearEverything = async () => {
     if (!confirm("Limpar todo o layout salvo e voltar para o padrao?")) return;
     layout = {};
     localStorage.removeItem(PORTAL_LAYOUT_STORAGE_KEY);
@@ -11660,17 +11719,31 @@ function initPortalLayoutEditor() {
     resetPortalLayoutStyles();
     selected = null;
     refreshToolButtons();
-    setPortalLayoutStatus("Layout limpo. Voce pode organizar de novo.");
+    setPortalLayoutStatus("Limpando layout global...");
+    try {
+      await writePortalLayoutRemote(layout);
+      setPortalLayoutStatus("Layout global limpo. Voce pode organizar de novo.");
+    } catch (error) {
+      console.error("[Portal] Erro ao limpar layout global.", error);
+      setPortalLayoutStatus(`Layout limpo localmente. Falha no global: ${error.message || error}`);
+    }
   };
 
   toggle?.addEventListener("click", () => {
     if (!canEditPortalLayout()) return;
     setEditing(!editing);
   });
-  saveButton?.addEventListener("click", () => {
+  saveButton?.addEventListener("click", async () => {
     if (!canEditPortalLayout()) return;
     writePortalLayout(layout);
-    setPortalLayoutStatus("Layout salvo neste navegador.");
+    setPortalLayoutStatus("Salvando layout global...");
+    try {
+      await writePortalLayoutRemote(layout);
+      setPortalLayoutStatus("Layout global salvo. Todos vao ver esta pagina.");
+    } catch (error) {
+      console.error("[Portal] Erro ao salvar layout global.", error);
+      setPortalLayoutStatus(`Layout salvo localmente. Falha no global: ${error.message || error}`);
+    }
   });
   resetButton?.addEventListener("click", () => {
     if (!canEditPortalLayout()) return;
@@ -11892,6 +11965,16 @@ function initPortalLayoutEditor() {
     setPortalLayoutStatus(describeSelection(selected));
   });
 
+  remoteLayoutPromise.then((remoteLayout) => {
+    if (remoteLayout === null) return;
+    layout = clonePortalLayout(remoteLayout);
+    undoStack = [clonePortalLayout(layout)];
+    redoStack = [];
+    selected = null;
+    applyPortalLayout(layout);
+    refreshToolButtons();
+    if (editing) setPortalLayoutStatus("Layout global carregado.");
+  });
   applyPortalLayout(layout);
   refreshToolButtons();
 }

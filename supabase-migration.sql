@@ -340,3 +340,36 @@ begin
     alter publication supabase_realtime add table public.rolagens;
   end if;
 end $$;
+
+create table if not exists public.site_configuracoes (
+  chave text primary key,
+  valor jsonb not null default '{}'::jsonb,
+  updated_by uuid null,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.site_configuracoes enable row level security;
+
+drop policy if exists "teste_all_site_configuracoes" on public.site_configuracoes;
+
+create policy "teste_all_site_configuracoes"
+on public.site_configuracoes
+for all
+to anon, authenticated
+using (true)
+with check (true);
+
+alter table public.site_configuracoes replica identity full;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_publication_tables
+    where pubname = 'supabase_realtime'
+    and schemaname = 'public'
+    and tablename = 'site_configuracoes'
+  ) then
+    alter publication supabase_realtime add table public.site_configuracoes;
+  end if;
+end $$;
