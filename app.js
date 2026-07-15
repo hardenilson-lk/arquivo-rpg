@@ -45,6 +45,9 @@ const voiceParticipants = new Map();
 const LEGACY_STORAGE_KEY = "mesa-arcana";
 const SESSION_STORAGE_KEY = "arquivo-rpg-session";
 const DND_LAYOUT_STORAGE_KEY = "orbe-dnd-layout";
+const MAX_PERSONAL_SHEETS = 5;
+
+let isCreatingPersonalSheet = false;
 
 const RPG_SYSTEMS = {
   arquivo: {
@@ -911,6 +914,41 @@ function uuidOrNull(value) {
   return isUuid(value) ? String(value) : null;
 }
 
+function personalSheetIdsForUser(user = currentUser()) {
+  if (!user) return [];
+  const userId = uuidOrNull(user.id) || user.id;
+  const username = normalizeKey(user.username);
+  const ids = [...(user.sheetIds || [])];
+  state.sheets.forEach((sheet) => {
+    if (!sheet?.id) return;
+    const sheetOwnerIds = [
+      sheet.user_id,
+      sheet.userId,
+      sheet.owner_id,
+      sheet.ownerId,
+      sheet.responsavel_id,
+      sheet.responsavelId
+    ].map((value) => uuidOrNull(value) || value);
+    const ownedById = sheetOwnerIds.includes(userId);
+    const ownedByName = sheetOrigin(sheet) === "jogador" && normalizeKey(sheet.player || sheet.jogador || "") === username;
+    if (ownedById || ownedByName || ids.includes(sheet.id)) ids.push(sheet.id);
+  });
+  return mergeUnique(ids);
+}
+
+function personalSheetsForUser(user = currentUser()) {
+  const ids = personalSheetIdsForUser(user);
+  return state.sheets.filter((sheet) => ids.includes(sheet.id));
+}
+
+function personalSheetCountForUser(user = currentUser()) {
+  return personalSheetsForUser(user).length;
+}
+
+function personalSheetLimitReached(user = currentUser()) {
+  return personalSheetCountForUser(user) >= MAX_PERSONAL_SHEETS;
+}
+
 function normalizeRole(value) {
   const role = normalizeKey(value);
   if (role === "admin-master" || role === "adm" || role === "admin") return "admin";
@@ -1164,12 +1202,29 @@ async function saveOnlineUser(user = currentUser()) {
 
 async function fetchUserCharacterRows(client, user) {
   if (!client || !isOnlineUser(user)) return { data: [], error: null };
+  console.log("Carregando minhas fichas");
+  console.log("Usuario atual:", { id: user.id, username: user.username });
   const query = `user_id.eq.${user.id},owner_id.eq.${user.id},responsavel_id.eq.${user.id}`;
   const result = await client.from("personagens").select("*").or(query);
-  if (!result.error) return { data: Array.isArray(result.data) ? result.data : [], error: null };
-  if (!isMissingColumnError(result.error)) return result;
+  if (!result.error) {
+    const rows = Array.isArray(result.data) ? result.data : [];
+    let legacyRows = [];
+    const legacy = await client.from("personagens").select("*").eq("jogador", user.username);
+    if (!legacy.error) legacyRows = Array.isArray(legacy.data) ? legacy.data : [];
+    else if (!isMissingColumnError(legacy.error)) console.warn("Erro ao carregar fichas pessoais", legacy.error);
+    const merged = mergeById(rows, legacyRows);
+    console.log("Fichas pessoais encontradas:", merged.length);
+    return { data: merged, error: null };
+  }
+  if (!isMissingColumnError(result.error)) {
+    console.error("Erro ao carregar fichas pessoais", result.error);
+    return result;
+  }
   console.warn("[Supabase] Colunas de controle de ficha ainda ausentes. Usando user_id como fallback. Rode supabase-migration.sql.", result.error);
-  return client.from("personagens").select("*").eq("user_id", user.id);
+  const fallback = await client.from("personagens").select("*").eq("user_id", user.id);
+  if (fallback.error) console.error("Erro ao carregar fichas pessoais", fallback.error);
+  else console.log("Fichas pessoais encontradas:", Array.isArray(fallback.data) ? fallback.data.length : 0);
+  return fallback;
 }
 
 async function loadOnlineWorkspace() {
@@ -1248,10 +1303,12 @@ async function loadOnlineWorkspace() {
       }))
       .filter((sheet) => {
         const row = sheetRows.find((item) => item.id === sheet.id);
+        const legacyPlayer = normalizeKey(row?.jogador || row?.payload?.player || sheet.player);
         return (user.sheetIds || []).includes(sheet.id) ||
           row?.user_id === user.id ||
           row?.owner_id === user.id ||
-          row?.responsavel_id === user.id;
+          row?.responsavel_id === user.id ||
+          legacyPlayer === normalizeKey(user.username);
       });
 
     state.campaigns = mergeById(state.campaigns, remoteCampaigns).map(normalizeCampaignRecord);
@@ -2177,7 +2234,7 @@ async function saveOnlineState() {
         campanha_id: uuidOrNull(state.activeCampaignId),
         personagem_id: uuidOrNull(state.activeSheetId),
         formula: roll.formula,
-        resultado: String(roll.displayTotal || roll.total || ""),
+        resultado: rollNumericResult(roll),
         payload: { ...roll, created_at: now },
         created_at: now
       })), { onConflict: "id" });
@@ -2257,10 +2314,13 @@ function createSheetForCurrentUser(name, systemId = "arquivo") {
   const user = currentUser();
   if (!user) throw new Error("Faca login primeiro.");
   user.sheetIds = user.sheetIds || [];
-  if (user.sheetIds.length >= 5) throw new Error("Limite de 5 fichas por conta atingido.");
+  const ownedCount = personalSheetCountForUser(user);
+  if (ownedCount >= MAX_PERSONAL_SHEETS) {
+    throw new Error(`Limite de ${MAX_PERSONAL_SHEETS} fichas por conta atingido. Apague uma ficha antes de criar outra.`);
+  }
   const system = systemFor(systemId);
   console.log("Criando ficha no Supabase", { nome: name, sistema_regra: system.id });
-  const defaultName = system.id === "dnd5e" ? `Aventureiro ${user.sheetIds.length + 1}` : `Agente ${user.sheetIds.length + 1}`;
+  const defaultName = system.id === "dnd5e" ? `Aventureiro ${ownedCount + 1}` : `Agente ${ownedCount + 1}`;
   const sheet = blankSheetForSystem(system.id, name || defaultName, user.username);
   sheet.campanha_id = "";
   sheet.campanhaId = "";
@@ -2273,6 +2333,7 @@ function createSheetForCurrentUser(name, systemId = "arquivo") {
   state.sheets.unshift(sheet);
   user.sheetIds.push(sheet.id);
   state.activeSheetId = sheet.id;
+  console.log("Ficha criada no Supabase:", { id: sheet.id, nome: sheet.name, origem: sheet.origem, owner_id: sheet.owner_id, sistema_regra: sheet.sistemaRegra });
   return sheet;
 }
 
@@ -5628,6 +5689,10 @@ function renderCrisisSheet() {
     button.addEventListener("click", () => rollFromText(button.dataset.rollText));
   });
 
+  els.crisisSheet.querySelectorAll("[data-roll-attack-index]").forEach((button) => {
+    button.addEventListener("click", () => rollAttack(Number(button.dataset.rollAttackIndex)));
+  });
+
   els.crisisSheet.querySelectorAll("[data-attack-field]").forEach((field) => {
     field.addEventListener("input", () => updateAttackField(Number(field.dataset.attackIndex), field.dataset.attackField, field.value, false));
     field.addEventListener("change", () => updateAttackField(Number(field.dataset.attackIndex), field.dataset.attackField, field.value));
@@ -6095,7 +6160,7 @@ function renderAttackRows(attacks) {
         <td><input data-attack-index="${index}" data-attack-field="critical" value="${escapeAttr(attack.critical)}" /></td>
         <td><input data-attack-index="${index}" data-attack-field="range" value="${escapeAttr(attack.range)}" /></td>
         <td><input data-attack-index="${index}" data-attack-field="special" value="${escapeAttr(attack.special)}" /></td>
-        <td><button type="button" data-roll-text="${escapeAttr(attack.damage || attack.test || item)}">Rolar</button><button type="button" data-remove-line="attacks" data-index="${index}">Remover</button></td>
+        <td><button type="button" data-roll-attack-index="${index}">Rolar</button><button type="button" data-remove-line="attacks" data-index="${index}">Remover</button></td>
       </tr>
     `;
   }).join("");
@@ -6150,6 +6215,29 @@ function updateAttackField(index, field, value, rerender = true) {
     suppressOnlineSave = false;
   }
   queueSheetPatch(sheet, "attacks", 800);
+}
+
+function rollAttack(index) {
+  const sheet = ensureActiveSheet();
+  const attacks = splitLines(sheet.attacks);
+  const attack = parseAttackLine(attacks[index] || "Novo ataque | 1d20 | 1d4 | 20 | Curto | -");
+  const testFormula = extractRollFormula(attack.test) || "1d20";
+  const damageFormula = extractRollFormula(attack.damage);
+  const attackRoll = performRoll(testFormula);
+  if (!attackRoll || !damageFormula || damageFormula === "-") return;
+
+  const d20Faces = (attackRoll.dice || [])
+    .filter((die) => die.sides === 20 && die.sign > 0)
+    .map((die) => die.face);
+  const failedHard = d20Faces.length ? d20Faces.every((face) => face === 1) : false;
+  if (failedHard) return;
+
+  window.setTimeout(() => {
+    const damageRoll = performRoll(damageFormula);
+    if (els.rollResult && damageRoll) {
+      els.rollResult.title = `${attack.name || "Ataque"} | Teste: ${testFormula} | Dano: ${damageFormula}`;
+    }
+  }, 950);
 }
 
 function renderLineList(lines, emptyText, field) {
@@ -8430,8 +8518,13 @@ function rollSkill(skillName) {
 }
 
 function rollFromText(text) {
-  const formula = String(text).match(/\d*d\d+(?:[+-]\d+)?/i)?.[0] || "1d20";
+  const formula = extractRollFormula(text) || "1d20";
   performRoll(formula);
+}
+
+function extractRollFormula(text) {
+  const compact = String(text || "").replace(/\s+/g, "");
+  return compact.match(/\d*d(?:%|\d+)(?:[+-]\d+)?/i)?.[0] || "";
 }
 
 function attrValueForSkill(sheet, attr) {
@@ -8678,6 +8771,63 @@ function stopMapPan() {
   panState = null;
 }
 
+const MAP_GUIDE_PAGES = [
+  {
+    title: "Assistente do Grid",
+    body: [
+      "Defina colunas, linhas, tamanho, offset, snap e coordenadas em Grid.",
+      "Use Fundo para subir uma imagem e ajustar opacidade, escala e posicao.",
+      "Use Ajustar tela para enquadrar o mapa no espaco visivel."
+    ]
+  },
+  {
+    title: "Paredes e Portas",
+    body: [
+      "Escolha Parede ou Porta e clique em dois pontos do mapa para criar uma linha.",
+      "Desenhar a mesma porta alterna entre fechada, aberta, trancada e secreta.",
+      "Paredes e portas fechadas bloqueiam movimento, luz e visao."
+    ]
+  },
+  {
+    title: "Luz, Neblina e Visao",
+    body: [
+      "Ative Neblina e use Revelar/Ocultar para controlar areas vistas.",
+      "Use Visao tokens para conferir o alcance de cada personagem.",
+      "Use Ver como jogador para testar o que a mesa realmente consegue enxergar."
+    ]
+  },
+  {
+    title: "Navegacao do Mapa",
+    body: [
+      "Segure espaco e arraste, ou use o botao do meio do mouse, para navegar.",
+      "Use zoom para aproximar ou afastar sem mexer no tamanho real do mapa.",
+      "Arraste tokens em quadrados validos; paredes e portas fechadas impedem passagem."
+    ]
+  }
+];
+
+let mapGuidePage = 0;
+
+function bindMapAssistantControls(panel, mode) {
+  panel.querySelector("[data-close-assistant]")?.addEventListener("click", () => panel.classList.add("hidden"));
+  panel.querySelector("[data-guide-prev]")?.addEventListener("click", () => {
+    mapGuidePage = (mapGuidePage - 1 + MAP_GUIDE_PAGES.length) % MAP_GUIDE_PAGES.length;
+    console.log("Indo para pagina anterior do guia");
+    console.log("Pagina do guia atual:", mapGuidePage + 1);
+    panel.innerHTML = mapGuideHtml(mode);
+    panel.scrollTop = 0;
+    bindMapAssistantControls(panel, mode);
+  });
+  panel.querySelector("[data-guide-next]")?.addEventListener("click", () => {
+    mapGuidePage = (mapGuidePage + 1) % MAP_GUIDE_PAGES.length;
+    console.log("Indo para proxima pagina do guia");
+    console.log("Pagina do guia atual:", mapGuidePage + 1);
+    panel.innerHTML = mapGuideHtml(mode);
+    panel.scrollTop = 0;
+    bindMapAssistantControls(panel, mode);
+  });
+}
+
 function toggleMapAssistant(mode = "guide") {
   const panel = document.querySelector("#mapAssistantPanel");
   if (!panel) return;
@@ -8686,26 +8836,38 @@ function toggleMapAssistant(mode = "guide") {
     panel.classList.add("hidden");
     return;
   }
+  console.log("Abrindo guia do grid", mode);
+  if (mode === "guide") mapGuidePage = 0;
+  console.log("Pagina do guia atual:", mapGuidePage + 1);
   panel.dataset.mode = mode;
   panel.classList.remove("hidden");
   panel.innerHTML = mode === "checklist" ? mapChecklistHtml() : mapGuideHtml(mode);
-  panel.querySelector("[data-close-assistant]")?.addEventListener("click", () => panel.classList.add("hidden"));
+  panel.scrollTop = 0;
+  bindMapAssistantControls(panel, mode);
 }
 
 function mapGuideHtml(mode) {
-  const title = mode === "help" ? "Ajuda da ferramenta" : "Assistente do Grid";
+  const page = MAP_GUIDE_PAGES[mapGuidePage] || MAP_GUIDE_PAGES[0];
+  const title = mode === "help" ? "Ajuda da ferramenta" : page.title;
+  const body = mode === "help"
+    ? [
+        "Selecione a ferramenta antes de clicar no mapa.",
+        "Token move personagens e NPCs. Ferramentas desenha paredes, portas e areas.",
+        "Se algo ficar preso, pressione Esc ou feche este painel."
+      ]
+    : page.body;
   return `
     <article class="assistant-paper">
       <button type="button" data-close-assistant>Fechar</button>
       <h3>${title}</h3>
-      <ol>
-        <li>Defina colunas, linhas, tamanho, offset, snap e coordenadas em Grid.</li>
-        <li>Use Fundo para subir uma imagem e alinhar opacidade, escala e posicao.</li>
-        <li>Escolha Parede ou Porta e clique em dois pontos do mapa para criar uma linha.</li>
-        <li>Desenhar a mesma porta alterna: fechada, aberta, trancada e secreta.</li>
-        <li>Ative Neblina e use Revelar/Ocultar para controlar areas vistas.</li>
-        <li>Segure espaco e arraste, ou use o botao do meio do mouse, para navegar.</li>
-      </ol>
+      <ol>${body.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ol>
+      ${mode === "guide" ? `
+        <div class="assistant-pager">
+          <button type="button" data-guide-prev>Anterior</button>
+          <span>Pagina ${mapGuidePage + 1} de ${MAP_GUIDE_PAGES.length}</span>
+          <button type="button" data-guide-next>Proxima</button>
+        </div>
+      ` : ""}
       <p><b>Regra operacional:</b> paredes e portas fechadas/trancadas/secretas bloqueiam luz e visao.</p>
     </article>
   `;
@@ -9217,8 +9379,8 @@ function saveSheet(event) {
   const user = currentUser();
   if (!existingSheet && user) {
     user.sheetIds = user.sheetIds || [];
-    if (user.sheetIds.length >= 5) {
-      window.alert("Limite de 5 fichas por conta atingido.");
+    if (personalSheetLimitReached(user)) {
+      window.alert(`Limite de ${MAX_PERSONAL_SHEETS} fichas por conta atingido. Apague uma ficha antes de criar outra.`);
       return;
     }
   }
@@ -9396,6 +9558,7 @@ function attrOr(value, fallback) {
 
 function rollFormula(formula) {
   const clean = formula.replace(/\s+/g, "").toLowerCase();
+  console.log("Expressao de rolagem:", formula);
   if (!/^[\dd+\-%]+$/.test(clean)) throw new Error("Use algo como 1d20+3, 2d6 ou 1d%.");
   const parts = clean.match(/[+\-]?[^+\-]+/g) || [];
   const allowedSides = new Set([4, 6, 8, 10, 12, 20, 100]);
@@ -9411,6 +9574,8 @@ function rollFormula(formula) {
       const sides = sidesText === "%" ? 100 : Number(sidesText);
       if (!allowedSides.has(sides)) throw new Error("Dados permitidos: d4, d6, d8, d10, d12, d20 e d%.");
       const rolls = Array.from({ length: amount }, () => Math.floor(Math.random() * sides) + 1);
+      console.log("Rolando dado:", { quantidade: amount, faces: sides, resultados: rolls });
+      if (sides === 4) console.log("Resultado d4:", rolls);
       rolls.forEach((value) => dice.push({ value: sign * value, face: value, sides, sign }));
     } else {
       const value = Number(body);
@@ -9441,7 +9606,7 @@ function rollFormula(formula) {
           : ones === 1 && rolls.length > 1
             ? "teste normal, possivel complicacao"
             : "teste normal";
-    return {
+    const payload = {
       formula: clean.replace(/d100/g, "d%"),
       total,
       seed,
@@ -9455,6 +9620,8 @@ function rollFormula(formula) {
       finalTotal: total,
       narrative
     };
+    console.log("Resultado final:", payload.finalTotal);
+    return payload;
   }
 
   const rollGroups = dice.reduce((groups, die) => {
@@ -9465,18 +9632,28 @@ function rollFormula(formula) {
   }, {});
   const rollText = Object.entries(rollGroups).map(([key, values]) => `${key}: ${values.join(", ")}`).join(" | ");
   const displayTotal = modifier ? `${rollText} | Bonus ${formatSigned(modifier)}` : rollText;
-  return {
+  const total = dice.reduce((sum, die) => sum + die.value, 0) + modifier;
+  const payload = {
     formula: clean.replace(/d100/g, "d%"),
-    total: seed,
+    total,
     seed,
     displayTotal,
-    detail: `Resultados separados: ${displayTotal}`,
+    detail: `Resultados separados: ${displayTotal} | Total: ${total}`,
     dice,
     rollMode: "open-roll",
     rolls: dice.map((die) => die.face),
     bonus: modifier,
+    finalTotal: total,
     narrative: "resultados mantidos separados"
   };
+  console.log("Resultado final:", payload.finalTotal);
+  return payload;
+}
+
+function rollNumericResult(roll) {
+  const raw = roll?.finalTotal ?? roll?.total ?? roll?.seed ?? roll?.highest;
+  const number = Number(raw);
+  return Number.isFinite(number) ? Math.round(number) : null;
 }
 
 async function saveRollOnline(roll) {
@@ -9485,17 +9662,21 @@ async function saveRollOnline(roll) {
   const campaignId = uuidOrNull(state.activeCampaignId);
   if (!client || !isOnlineUser(user) || !campaignId || !roll?.id) return;
   const createdAt = roll.created_at || new Date().toISOString();
+  const numericResult = rollNumericResult(roll);
   const { error } = await client.from("rolagens").insert({
     id: roll.id,
     user_id: user.id,
     campanha_id: campaignId,
     personagem_id: uuidOrNull(state.activeSheetId),
     formula: roll.formula,
-    resultado: String(roll.displayTotal || roll.total || roll.finalTotal || ""),
+    resultado: numericResult,
     payload: { ...roll, created_at: createdAt },
     created_at: createdAt
   });
-  if (error) console.error("[Supabase] Erro Supabase", { table: "rolagens", error });
+  if (error) {
+    console.error("[Supabase] Erro Supabase", { table: "rolagens", roll_id: roll.id, resultado: numericResult, error });
+    setSyncStatus(`Arquivo local salvo. Falha online: rolagens: ${remoteErrorMessage(error)}`, true);
+  }
 }
 
 function applyRemoteRollRow(row) {
@@ -9541,9 +9722,14 @@ function performRoll(formula) {
     renderRollLog();
     saveRollOnline(roll);
     save();
+    return roll;
   } catch (error) {
-    els.rollResult.textContent = error.message;
-    els.rollResult.title = "Corrija a formula e clique para tentar de novo.";
+    console.error("Erro na rolagem", error);
+    if (els.rollResult) {
+      els.rollResult.textContent = error.message;
+      els.rollResult.title = "Corrija a formula e clique para tentar de novo.";
+    }
+    return null;
   }
 }
 
@@ -9611,14 +9797,18 @@ function animateDiceRoll(result) {
   const width = Math.max(stageRect.width, 320);
   const height = Math.max(stageRect.height, 240);
   const visibleDice = result.dice.slice(0, 18);
+  const placedDice = [];
+  const minGap = 12;
 
   visibleDice.forEach((die, index) => {
     const node = document.createElement("div");
     const dieSize = die.sides <= 6 ? 46 : die.sides >= 12 ? 54 : 50;
     const startX = 20 + (index % 4) * 18;
     const startY = height - 82 - (index % 3) * 22;
-    const endX = Math.max(24, Math.min(width - dieSize - 24, width * (0.34 + seededRandom(index, result.seed) * 0.42)));
-    const endY = Math.max(22, Math.min(height - dieSize - 26, height * (0.2 + seededRandom(index + 11, result.seed) * 0.48)));
+    const landing = diceLandingPosition(index, result.seed, dieSize, width, height, placedDice, minGap);
+    const endX = landing.x;
+    const endY = landing.y;
+    placedDice.push({ x: endX, y: endY, size: dieSize });
     node.className = `visual-die d${die.sides}`;
     node.dataset.die = die.sides === 100 ? "d%" : `d${die.sides}`;
     node.textContent = die.sign < 0 ? `-${die.face}` : die.face;
@@ -9645,6 +9835,36 @@ function animateDiceRoll(result) {
     els.diceStage.innerHTML = "";
     els.diceStage.className = "dice-stage";
   }, 5000);
+}
+
+function diceLandingPosition(index, seed, dieSize, width, height, placedDice, minGap = 10) {
+  const marginX = 24;
+  const marginY = 22;
+  const maxX = Math.max(marginX, width - dieSize - marginX);
+  const maxY = Math.max(marginY, height - dieSize - 26);
+  const centerBandX = [width * 0.24, width * 0.78];
+  const centerBandY = [height * 0.16, height * 0.74];
+  const collides = (x, y) => placedDice.some((other) => (
+    x < other.x + other.size + minGap
+    && x + dieSize + minGap > other.x
+    && y < other.y + other.size + minGap
+    && y + dieSize + minGap > other.y
+  ));
+
+  for (let attempt = 0; attempt < 36; attempt += 1) {
+    const xSeed = index * 17 + attempt * 5;
+    const ySeed = index * 23 + attempt * 7 + 11;
+    const rawX = centerBandX[0] + seededRandom(xSeed, seed) * (centerBandX[1] - centerBandX[0]);
+    const rawY = centerBandY[0] + seededRandom(ySeed, seed) * (centerBandY[1] - centerBandY[0]);
+    const x = Math.max(marginX, Math.min(maxX, rawX));
+    const y = Math.max(marginY, Math.min(maxY, rawY));
+    if (!collides(x, y)) return { x, y };
+  }
+
+  const columns = Math.max(1, Math.floor((maxX - marginX + dieSize) / (dieSize + minGap)));
+  const x = Math.max(marginX, Math.min(maxX, marginX + (index % columns) * (dieSize + minGap)));
+  const y = Math.max(marginY, Math.min(maxY, marginY + Math.floor(index / columns) * (dieSize + minGap)));
+  return { x, y };
 }
 
 function rollSpecialClass(result) {
@@ -9765,6 +9985,7 @@ function showPortal() {
   document.querySelector("#appShell")?.classList.add("hidden");
   document.body.classList.remove("sheet-area");
   renderPortal();
+  initPortalLayoutEditor();
 }
 
 function startBackgroundDataLoad(reason = "login") {
@@ -9889,6 +10110,7 @@ function renderPortal() {
   const badge = document.querySelector("#portalUserBadge");
   const limit = document.querySelector("#sheetLimitInfo");
   const inviteInput = document.querySelector("#inviteCode");
+  const createSheetButton = document.querySelector("#createSheetButton");
   if (!user) return;
   renderSystemSelectors();
   renderSystemCards();
@@ -9896,7 +10118,17 @@ function renderPortal() {
   const inviteFromHash = new URLSearchParams(window.location.hash.replace(/^#/, "")).get("convite");
   if (inviteInput && inviteFromHash && !inviteInput.value) inviteInput.value = inviteFromHash;
   if (badge) badge.textContent = `${user.username} | ${user.role === "admin" ? "ADM MASTER" : user.role === "master" ? "MESTRE" : "JOGADOR"}`;
-  if (limit) limit.textContent = `Limite: ${(user.sheetIds || []).length}/5 fichas por conta.`;
+  const ownedSheets = personalSheetsForUser(user);
+  const sheetCount = ownedSheets.length;
+  if (limit) {
+    limit.textContent = sheetCount >= MAX_PERSONAL_SHEETS
+      ? `Limite atingido: ${sheetCount}/${MAX_PERSONAL_SHEETS} fichas. Apague uma ficha para criar outra.`
+      : `Fichas na conta: ${sheetCount}/${MAX_PERSONAL_SHEETS}.`;
+  }
+  if (createSheetButton) {
+    createSheetButton.disabled = isCreatingPersonalSheet || sheetCount >= MAX_PERSONAL_SHEETS;
+    createSheetButton.textContent = isCreatingPersonalSheet ? "Criando ficha..." : "Criar e abrir ficha";
+  }
   const visibleCampaigns = state.campaigns.filter((campaign) => campaign.mestreId === user.id || user.role === "admin" || (user.campaignIds || []).includes(campaign.id) || (campaign.jogadores || []).includes(user.id));
   if (campaigns) {
     campaigns.innerHTML = visibleCampaigns.length ? visibleCampaigns.map((campaign) => `
@@ -9917,7 +10149,7 @@ function renderPortal() {
     `).join("") : `<p>Nenhuma campanha vinculada.</p>`;
   }
   if (sheets) {
-    const owned = state.sheets.filter((sheet) => (user.sheetIds || []).includes(sheet.id));
+    const owned = ownedSheets;
     sheets.innerHTML = owned.length ? owned.map((sheet) => `
       <article class="archive-file-card">
         <b>${escapeHtml(sheet.name || "Agente")}</b>
@@ -10240,6 +10472,11 @@ function syncSystemTabs() {
 }
 
 function switchTab(tabId) {
+  if (isMobileLayout()) {
+    closeMobilePanel();
+    closeSidebarMenu();
+    closeOpenMapToolDrawers();
+  }
   if (tabId === "rituais" && activeCampaignSystemId() === "dnd5e") tabId = "inventario";
   if (tabId === "biblioteca" && !isMasterMode()) tabId = "mesa";
   state.activeTab = tabId;
@@ -10268,6 +10505,74 @@ function switchTab(tabId) {
 
 ensureRitualsTab();
 ensureSoundtrackStudioTab();
+
+function isMobileLayout() {
+  return window.matchMedia("(max-width: 768px)").matches;
+}
+
+function closePortalMobileMenu() {
+  document.body.classList.remove("portal-mobile-menu-open");
+  document.querySelector("#portalMobileMenuButton")?.setAttribute("aria-expanded", "false");
+}
+
+function closeSidebarMenu() {
+  const shell = document.querySelector("#appShell");
+  if (!shell || shell.classList.contains("sidebar-collapsed")) return;
+  shell.classList.add("sidebar-collapsed");
+  els.sidebarToggle?.setAttribute("aria-expanded", "false");
+  if (els.sidebarToggle) els.sidebarToggle.textContent = "☰ Menu";
+}
+
+function closeOpenMapToolDrawers(except = null) {
+  document.querySelectorAll(".map-quick-tools details[open]").forEach((details) => {
+    if (details !== except) details.removeAttribute("open");
+  });
+}
+
+const MOBILE_PANEL_SELECTORS = {
+  master: ".master-shield",
+  clues: ".clues-panel",
+  voice: ".voice-panel",
+  soundtrack: ".soundtrack-panel",
+  history: ".history-panel"
+};
+
+function closeMobilePanelMenu() {
+  const menu = document.querySelector("#mobilePanelMenu");
+  menu?.classList.remove("open");
+  document.querySelector("#mobilePanelToggle")?.setAttribute("aria-expanded", "false");
+}
+
+function closeMobilePanel() {
+  document.body.removeAttribute("data-mobile-panel-open");
+  document.querySelector("#mobilePanelBackdrop")?.setAttribute("hidden", "");
+  document.querySelectorAll(".mobile-panel-active").forEach((panel) => panel.classList.remove("mobile-panel-active"));
+  closeMobilePanelMenu();
+}
+
+function ensureMobilePanelClose(panel) {
+  if (!panel || panel.querySelector("[data-mobile-panel-close]")) return;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "mobile-panel-close";
+  button.dataset.mobilePanelClose = "";
+  button.textContent = "Fechar";
+  button.addEventListener("click", closeMobilePanel);
+  panel.prepend(button);
+}
+
+function openMobilePanel(panelId) {
+  const selector = MOBILE_PANEL_SELECTORS[panelId];
+  const panel = selector ? document.querySelector(selector) : null;
+  if (!panel) return;
+  document.querySelectorAll(".mobile-panel-active").forEach((activePanel) => {
+    if (activePanel !== panel) activePanel.classList.remove("mobile-panel-active");
+  });
+  ensureMobilePanelClose(panel);
+  panel.classList.add("mobile-panel-active");
+  document.body.dataset.mobilePanelOpen = panelId;
+  document.querySelector("#mobilePanelBackdrop")?.removeAttribute("hidden");
+}
 
 document.querySelectorAll("[data-tab]").forEach((tab) => {
   tab.addEventListener("click", () => switchTab(tab.dataset.tab));
@@ -10402,15 +10707,70 @@ document.querySelector("#backPortal")?.addEventListener("click", () => {
 document.querySelectorAll("[data-portal-page-button], [data-portal-page-link]").forEach((button) => {
   button.addEventListener("click", () => {
     switchPortalPage(button.dataset.portalPageButton || button.dataset.portalPageLink);
+    closePortalMobileMenu();
   });
+});
+
+document.querySelector("#portalMobileMenuButton")?.addEventListener("click", (event) => {
+  event.stopPropagation();
+  const opened = !document.body.classList.contains("portal-mobile-menu-open");
+  document.body.classList.toggle("portal-mobile-menu-open", opened);
+  document.querySelector("#portalMobileMenuButton")?.setAttribute("aria-expanded", String(opened));
 });
 
 els.sidebarToggle?.addEventListener("click", () => {
   const shell = document.querySelector("#appShell");
   if (!shell) return;
+  closeMobilePanel();
   const collapsed = shell.classList.toggle("sidebar-collapsed");
   els.sidebarToggle.setAttribute("aria-expanded", String(!collapsed));
   els.sidebarToggle.textContent = collapsed ? "☰ Menu" : "× Fechar";
+});
+
+document.querySelector("#mobileRollButton")?.addEventListener("click", () => {
+  switchTab("mesa");
+  performRoll(currentRollFormula());
+});
+
+document.querySelector("#mobilePanelToggle")?.addEventListener("click", (event) => {
+  event.stopPropagation();
+  const menu = document.querySelector("#mobilePanelMenu");
+  if (!menu) return;
+  const opened = !menu.classList.contains("open");
+  menu.classList.toggle("open", opened);
+  document.querySelector("#mobilePanelToggle")?.setAttribute("aria-expanded", String(opened));
+});
+
+document.querySelectorAll("[data-mobile-panel]").forEach((button) => {
+  button.addEventListener("click", () => {
+    openMobilePanel(button.dataset.mobilePanel);
+    closeMobilePanelMenu();
+  });
+});
+
+document.querySelector("#mobilePanelBackdrop")?.addEventListener("click", closeMobilePanel);
+
+document.addEventListener("pointerdown", (event) => {
+  if (!isMobileLayout()) return;
+  const target = event.target;
+  if (document.body.classList.contains("portal-mobile-menu-open") && !target.closest(".portal-head")) {
+    closePortalMobileMenu();
+  }
+  const shell = document.querySelector("#appShell");
+  const sideOpen = shell && !shell.classList.contains("sidebar-collapsed");
+  if (sideOpen && !target.closest(".folder-sidebar") && !target.closest("#sidebarToggle")) {
+    closeSidebarMenu();
+  }
+  if (!target.closest("#mobilePanelMenu") && !target.closest(".mobile-panel-active")) {
+    closeMobilePanelMenu();
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  closePortalMobileMenu();
+  closeMobilePanel();
+  if (isMobileLayout()) closeSidebarMenu();
 });
 
 document.querySelector("#saveFileButton")?.addEventListener("click", saveCurrentFile);
@@ -10437,6 +10797,21 @@ document.querySelector("#createCampaignButton")?.addEventListener("click", async
 });
 
 document.querySelector("#createSheetButton")?.addEventListener("click", async () => {
+  if (isCreatingPersonalSheet) return;
+  const button = document.querySelector("#createSheetButton");
+  const user = currentUser();
+  if (personalSheetLimitReached(user)) {
+    const message = `Limite de ${MAX_PERSONAL_SHEETS} fichas por conta atingido. Apague uma ficha antes de criar outra.`;
+    setSyncStatus(message, true);
+    window.alert(message);
+    renderPortal();
+    return;
+  }
+  isCreatingPersonalSheet = true;
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Criando ficha...";
+  }
   try {
     const systemId = selectedSystemValue("#newSheetSystem");
     const defaultName = systemId === "dnd5e" ? "Novo aventureiro" : "Novo agente";
@@ -10451,6 +10826,9 @@ document.querySelector("#createSheetButton")?.addEventListener("click", async ()
     showApp("sheet");
   } catch (error) {
     window.alert(error.message);
+  } finally {
+    isCreatingPersonalSheet = false;
+    renderPortal();
   }
 });
 
@@ -10672,6 +11050,11 @@ document.querySelector("#mapHelpButton")?.addEventListener("click", () => toggle
 document.querySelector("#mapChecklistButton")?.addEventListener("click", () => toggleMapAssistant("checklist"));
 window.addEventListener("resize", () => {
   if (state.activeTab === "mesa") window.setTimeout(fitGridToView, 80);
+  if (!isMobileLayout()) {
+    closePortalMobileMenu();
+    closeMobilePanel();
+    closeOpenMapToolDrawers();
+  }
 });
 document.querySelector("#removeMapImage")?.addEventListener("click", () => {
   if (isMasterMode()) removeMapBackground();
@@ -10802,6 +11185,717 @@ document.querySelectorAll("[data-roll]").forEach((button) => {
   });
 });
 
+const PORTAL_LAYOUT_STORAGE_KEY = "orbe.portal.homeLayout.v1";
+const PORTAL_LAYOUT_CUSTOM_KEY = "__customItems";
+const PORTAL_LAYOUT_HANDLE_DIRECTIONS = ["n", "s", "e", "w", "ne", "nw", "se", "sw"];
+
+function clampLayoutNumber(value, min, max) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return min;
+  return Math.max(min, Math.min(max, number));
+}
+
+function normalizePortalLayoutItem(item = {}) {
+  const legacyScale = clampLayoutNumber(item.scale || 1, 0.2, 4);
+  let x = Number(item.x);
+  let y = Number(item.y);
+  const zIndex = Number(item.zIndex);
+  if (!Number.isFinite(x) || Math.abs(x) >= 2990) x = 0;
+  if (!Number.isFinite(y) || Math.abs(y) >= 2990) y = 0;
+  return {
+    x: clampLayoutNumber(x, -1600, 1600),
+    y: clampLayoutNumber(y, -1600, 1600),
+    scaleX: clampLayoutNumber(item.scaleX || legacyScale, 0.2, 4),
+    scaleY: clampLayoutNumber(item.scaleY || legacyScale, 0.2, 4),
+    imageSrc: typeof item.imageSrc === "string" ? item.imageSrc : "",
+    hidden: Boolean(item.hidden),
+    zIndex: Number.isFinite(zIndex) ? clampLayoutNumber(zIndex, 1, 99) : 7,
+  };
+}
+
+function readPortalLayout() {
+  try {
+    return JSON.parse(localStorage.getItem(PORTAL_LAYOUT_STORAGE_KEY) || "{}") || {};
+  } catch (error) {
+    console.warn("[Portal] Layout salvo invalido.", error);
+    return {};
+  }
+}
+
+function writePortalLayout(layout) {
+  localStorage.setItem(PORTAL_LAYOUT_STORAGE_KEY, JSON.stringify(layout || {}));
+}
+
+function clonePortalLayout(layout) {
+  try {
+    return JSON.parse(JSON.stringify(layout || {})) || {};
+  } catch (error) {
+    console.warn("[Portal] Nao foi possivel clonar layout.", error);
+    return {};
+  }
+}
+
+function portalCustomEntries(layout) {
+  if (!layout || typeof layout !== "object") return [];
+  if (!Array.isArray(layout[PORTAL_LAYOUT_CUSTOM_KEY])) layout[PORTAL_LAYOUT_CUSTOM_KEY] = [];
+  return layout[PORTAL_LAYOUT_CUSTOM_KEY];
+}
+
+function portalCustomEntry(layout, key) {
+  return portalCustomEntries(layout).find((entry) => entry?.key === key) || null;
+}
+
+function portalEscapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function renderPortalCustomItems(layout) {
+  const layer = document.querySelector("#portalCustomLayer");
+  if (!layer) return;
+  const entries = portalCustomEntries(layout).filter((entry) => entry?.key);
+  layer.innerHTML = "";
+  entries.forEach((entry) => {
+    const item = normalizePortalLayoutItem(layout[entry.key]);
+    layout[entry.key] = { ...layout[entry.key], ...item };
+    const element = document.createElement(entry.type === "image" ? "figure" : "div");
+    element.className = `portal-custom-item portal-custom-${entry.type || "box"}`;
+    element.dataset.layoutKey = entry.key;
+    element.dataset.portalCustom = "true";
+    element.title = "Elemento livre";
+    if (entry.type === "image") {
+      const image = document.createElement("img");
+      image.alt = entry.label || "Imagem adicionada";
+      image.src = item.imageSrc || "./assets/orbe/home-frame.png";
+      element.appendChild(image);
+    } else if (entry.type === "text") {
+      element.innerHTML = `<span>${portalEscapeHtml(entry.text || "Novo texto")}</span>`;
+    } else {
+      element.innerHTML = `<span class="portal-custom-label">${portalEscapeHtml(entry.text || "Nova caixa")}</span>`;
+    }
+    layer.appendChild(element);
+  });
+}
+
+function portalLayoutTargets() {
+  return Array.from(document.querySelectorAll("#portalScreen [data-layout-key]"));
+}
+
+function portalTargetImage(target) {
+  if (!target) return null;
+  if (target.matches("img")) return target;
+  return target.querySelector("img");
+}
+
+function rememberPortalOriginalImage(target) {
+  const image = portalTargetImage(target);
+  if (image && !image.dataset.originalSrc) {
+    image.dataset.originalSrc = image.getAttribute("src") || "";
+  }
+}
+
+function applyPortalLayout(layout = readPortalLayout()) {
+  renderPortalCustomItems(layout);
+  portalLayoutTargets().forEach((target) => {
+    rememberPortalOriginalImage(target);
+    const item = layout[target.dataset.layoutKey];
+    if (!item) {
+      target.dataset.layoutHidden = "false";
+      return;
+    }
+    const normalized = normalizePortalLayoutItem(item);
+    layout[target.dataset.layoutKey] = { ...item, ...normalized };
+    target.style.setProperty("--layout-x", `${normalized.x}px`);
+    target.style.setProperty("--layout-y", `${normalized.y}px`);
+    target.style.setProperty("--layout-scale-x", String(normalized.scaleX));
+    target.style.setProperty("--layout-scale-y", String(normalized.scaleY));
+    target.style.zIndex = String(normalized.zIndex);
+    target.dataset.layoutHidden = normalized.hidden ? "true" : "false";
+    if (normalized.imageSrc) {
+      const image = portalTargetImage(target);
+      if (image) image.src = normalized.imageSrc;
+    }
+  });
+}
+
+function resetPortalLayoutStyles() {
+  portalLayoutTargets().forEach((target) => {
+    target.style.removeProperty("--layout-x");
+    target.style.removeProperty("--layout-y");
+    target.style.removeProperty("--layout-scale");
+    target.style.removeProperty("--layout-scale-x");
+    target.style.removeProperty("--layout-scale-y");
+    target.style.removeProperty("z-index");
+    target.dataset.layoutHidden = "false";
+    target.classList.remove("layout-selected");
+    target.querySelectorAll(":scope > .layout-resize-handle").forEach((handle) => handle.remove());
+    const image = portalTargetImage(target);
+    if (image?.dataset.originalSrc) image.src = image.dataset.originalSrc;
+  });
+  const layer = document.querySelector("#portalCustomLayer");
+  if (layer) layer.innerHTML = "";
+}
+
+function removePortalLayoutHandles(target) {
+  target?.querySelectorAll(":scope > .layout-resize-handle").forEach((handle) => handle.remove());
+}
+
+function removeAllPortalLayoutHandles() {
+  portalLayoutTargets().forEach((target) => removePortalLayoutHandles(target));
+}
+
+function ensurePortalLayoutHandles(target) {
+  if (!target) return;
+  rememberPortalOriginalImage(target);
+  if (!target.querySelector(":scope > .layout-resize-handle")) {
+    PORTAL_LAYOUT_HANDLE_DIRECTIONS.forEach((direction) => {
+      const handle = document.createElement("span");
+      handle.className = `layout-resize-handle layout-resize-${direction}`;
+      handle.dataset.resizeDirection = direction;
+      handle.title = "Redimensionar";
+      handle.setAttribute("aria-hidden", "true");
+      target.appendChild(handle);
+    });
+  }
+}
+
+function portalLayoutTargetFromEvent(event, root) {
+  const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+  const fromPath = path.find((node) => node instanceof Element && node.matches?.("#portalScreen [data-layout-key]"));
+  if (fromPath && root?.contains(fromPath)) return fromPath;
+  const target = event.target instanceof Element ? event.target.closest("#portalScreen [data-layout-key]") : null;
+  return target && root?.contains(target) ? target : null;
+}
+
+function setPortalLayoutStatus(message) {
+  const status = document.querySelector("#portalLayoutStatus");
+  if (status) status.textContent = message;
+}
+
+function canEditPortalLayout() {
+  const user = typeof currentUser === "function" ? currentUser() : null;
+  const username = String(user?.username || user?.email || user?.nome || "").trim().toLowerCase();
+  const role = String(user?.role || user?.cargo || "").trim().toLowerCase();
+  return username === "adenilsonlk" || username === "admin" || role === "admin" || role === "admin-master";
+}
+
+function syncPortalLayoutEditorAccess() {
+  const allowed = canEditPortalLayout();
+  const toggle = document.querySelector("#portalLayoutToggle");
+  const toolbar = document.querySelector("[data-layout-editor]");
+  if (toolbar) toolbar.hidden = !allowed;
+  if (toggle) toggle.hidden = !allowed;
+  if (!allowed) {
+    toolbar?.querySelectorAll("button:not(#portalLayoutToggle)").forEach((button) => {
+      button.hidden = true;
+    });
+    document.body.classList.remove("portal-layout-editing");
+    portalLayoutTargets().forEach((target) => target.classList.remove("layout-selected"));
+    removeAllPortalLayoutHandles();
+    setPortalLayoutStatus("");
+  }
+  return allowed;
+}
+
+function initPortalLayoutEditor() {
+  const toggle = document.querySelector("#portalLayoutToggle");
+  const saveButton = document.querySelector("#portalLayoutSave");
+  const resetButton = document.querySelector("#portalLayoutReset");
+  const redoButton = document.querySelector("#portalLayoutRedo");
+  const addTextButton = document.querySelector("#portalLayoutAddText");
+  const addBoxButton = document.querySelector("#portalLayoutAddBox");
+  const addImageButton = document.querySelector("#portalLayoutAddImage");
+  const duplicateButton = document.querySelector("#portalLayoutDuplicate");
+  const deleteButton = document.querySelector("#portalLayoutDelete");
+  const bringForwardButton = document.querySelector("#portalLayoutBringForward");
+  const sendBackwardButton = document.querySelector("#portalLayoutSendBackward");
+  const swapButton = document.querySelector("#portalLayoutSwapImage");
+  const hardResetButton = document.querySelector("#portalLayoutHardReset");
+  const imageInput = document.querySelector("#portalLayoutImageInput");
+  const newImageInput = document.querySelector("#portalLayoutNewImageInput");
+  const portalScreen = document.querySelector("#portalScreen");
+  let layout = readPortalLayout();
+  let editing = false;
+  let selected = null;
+  let activeDrag = null;
+  let pendingImageMode = "swap";
+  let undoStack = [clonePortalLayout(layout)];
+  let redoStack = [];
+
+  applyPortalLayout(layout);
+  if (!syncPortalLayoutEditorAccess()) return;
+  if (window.__orbePortalLayoutEditorReady) return;
+  window.__orbePortalLayoutEditorReady = true;
+
+  hardResetButton?.classList.add("portal-layout-danger");
+  deleteButton?.classList.add("portal-layout-danger");
+
+  const findTargetByKey = (key) => key ? document.querySelector(`#portalScreen [data-layout-key="${CSS.escape(key)}"]`) : null;
+
+  const currentItem = (target) => {
+    const key = target.dataset.layoutKey;
+    layout[key] = { ...layout[key], ...normalizePortalLayoutItem(layout[key]) };
+    return layout[key];
+  };
+
+  const refreshSelected = () => {
+    const key = selected?.dataset.layoutKey;
+    if (!key) return;
+    const fresh = findTargetByKey(key);
+    if (fresh) selectTarget(fresh, false);
+  };
+
+  const refreshToolButtons = () => {
+    const selectedIsImage = selected && portalTargetImage(selected);
+    const selectedExists = Boolean(selected);
+    const showWhenEditing = [
+      saveButton,
+      resetButton,
+      redoButton,
+      addTextButton,
+      addBoxButton,
+      addImageButton,
+      hardResetButton,
+    ];
+    showWhenEditing.forEach((button) => {
+      if (button) button.hidden = !editing;
+    });
+    [duplicateButton, deleteButton, bringForwardButton, sendBackwardButton].forEach((button) => {
+      if (button) button.hidden = !editing || !selectedExists;
+    });
+    if (swapButton) swapButton.hidden = !editing || !selected || !portalTargetImage(selected);
+    if (resetButton) resetButton.disabled = undoStack.length <= 1;
+    if (redoButton) redoButton.disabled = redoStack.length === 0;
+  };
+
+  const describeSelection = (target) => {
+    if (!target) return "";
+    const item = currentItem(target);
+    return `Selecionado: ${target.dataset.layoutKey} | X ${Math.round(item.x)} Y ${Math.round(item.y)} | largura ${Math.round(item.scaleX * 100)}% altura ${Math.round(item.scaleY * 100)}%`;
+  };
+
+  const sameLayout = (a, b) => JSON.stringify(a || {}) === JSON.stringify(b || {});
+
+  const pushHistory = (message = "") => {
+    const snapshot = clonePortalLayout(layout);
+    if (!sameLayout(snapshot, undoStack[undoStack.length - 1])) {
+      undoStack.push(snapshot);
+      if (undoStack.length > 90) undoStack.shift();
+      redoStack = [];
+    }
+    refreshToolButtons();
+    if (message) setPortalLayoutStatus(message);
+  };
+
+  const restoreLayout = (snapshot, message = "") => {
+    layout = clonePortalLayout(snapshot);
+    applyPortalLayout(layout);
+    selected = null;
+    removeAllPortalLayoutHandles();
+    refreshToolButtons();
+    setPortalLayoutStatus(message || "Layout restaurado.");
+  };
+
+  const undoLayout = () => {
+    if (undoStack.length <= 1) {
+      setPortalLayoutStatus("Nao ha mais movimentos para voltar.");
+      return;
+    }
+    redoStack.push(undoStack.pop());
+    restoreLayout(undoStack[undoStack.length - 1], "Voltei uma acao. Aperte de novo para voltar mais.");
+  };
+
+  const redoLayout = () => {
+    if (!redoStack.length) {
+      setPortalLayoutStatus("Nao ha acao para refazer.");
+      return;
+    }
+    const snapshot = redoStack.pop();
+    undoStack.push(clonePortalLayout(snapshot));
+    restoreLayout(snapshot, "Refiz a ultima acao.");
+  };
+
+  const setEditing = (enabled) => {
+    editing = Boolean(enabled);
+    document.body.classList.toggle("portal-layout-editing", editing);
+    toggle?.setAttribute("aria-pressed", String(editing));
+    if (toggle) toggle.textContent = editing ? "Concluir organizacao" : "Organizar pagina";
+    if (editing) {
+      removeAllPortalLayoutHandles();
+      setPortalLayoutStatus("Modo organizacao: arraste, redimensione pelos cantos, use Ctrl+Z para voltar e adicione novos elementos.");
+    } else {
+      portalLayoutTargets().forEach((target) => target.classList.remove("layout-selected"));
+      removeAllPortalLayoutHandles();
+      selected = null;
+      setPortalLayoutStatus("Organizacao pausada. Os botoes voltaram a funcionar.");
+    }
+    refreshToolButtons();
+  };
+
+  function selectTarget(target, announce = true) {
+    if (!target) {
+      portalLayoutTargets().forEach((item) => item.classList.remove("layout-selected"));
+      removeAllPortalLayoutHandles();
+      selected = null;
+      refreshToolButtons();
+      return;
+    }
+    portalLayoutTargets().forEach((item) => item.classList.toggle("layout-selected", item === target));
+    removeAllPortalLayoutHandles();
+    ensurePortalLayoutHandles(target);
+    selected = target;
+    refreshToolButtons();
+    if (announce) setPortalLayoutStatus(describeSelection(target));
+  }
+
+  const createCustomElement = (type, options = {}) => {
+    const key = `custom-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const entries = portalCustomEntries(layout);
+    entries.push({
+      key,
+      type,
+      text: options.text || (type === "text" ? "Novo texto" : "Nova caixa"),
+      label: options.label || "",
+    });
+    layout[key] = {
+      x: clampLayoutNumber(options.x ?? 140, -1600, 1600),
+      y: clampLayoutNumber(options.y ?? 120, -1600, 1600),
+      scaleX: clampLayoutNumber(options.scaleX ?? 1, 0.2, 4),
+      scaleY: clampLayoutNumber(options.scaleY ?? 1, 0.2, 4),
+      imageSrc: options.imageSrc || "",
+      zIndex: clampLayoutNumber(options.zIndex ?? 14 + entries.length, 1, 99),
+    };
+    applyPortalLayout(layout);
+    selectTarget(findTargetByKey(key));
+    pushHistory("Elemento novo adicionado. Voce pode mover, esticar, achatar ou trocar a imagem.");
+  };
+
+  const editSelectedText = () => {
+    if (!selected) return;
+    const entry = portalCustomEntry(layout, selected.dataset.layoutKey);
+    if (!entry || entry.type === "image") return;
+    const nextText = prompt("Digite o texto do elemento:", entry.text || "");
+    if (nextText === null) return;
+    entry.text = nextText.trim() || "Texto";
+    applyPortalLayout(layout);
+    selectTarget(findTargetByKey(entry.key));
+    pushHistory("Texto atualizado.");
+  };
+
+  const duplicateSelected = () => {
+    if (!selected) return;
+    const key = selected.dataset.layoutKey;
+    const item = currentItem(selected);
+    const entry = portalCustomEntry(layout, key);
+    if (entry) {
+      createCustomElement(entry.type, {
+        text: entry.text,
+        label: entry.label,
+        imageSrc: item.imageSrc,
+        x: item.x + 28,
+        y: item.y + 28,
+        scaleX: item.scaleX,
+        scaleY: item.scaleY,
+        zIndex: item.zIndex + 1,
+      });
+      return;
+    }
+    const image = portalTargetImage(selected);
+    if (image) {
+      createCustomElement("image", {
+        imageSrc: image.src,
+        label: selected.dataset.layoutKey,
+        x: item.x + 28,
+        y: item.y + 28,
+        scaleX: item.scaleX,
+        scaleY: item.scaleY,
+        zIndex: item.zIndex + 1,
+      });
+    } else {
+      createCustomElement("text", {
+        text: selected.textContent.trim().slice(0, 90) || selected.dataset.layoutKey,
+        x: item.x + 28,
+        y: item.y + 28,
+        scaleX: item.scaleX,
+        scaleY: item.scaleY,
+        zIndex: item.zIndex + 1,
+      });
+    }
+  };
+
+  const deleteSelected = () => {
+    if (!selected) return;
+    const key = selected.dataset.layoutKey;
+    const entry = portalCustomEntry(layout, key);
+    if (entry) {
+      layout[PORTAL_LAYOUT_CUSTOM_KEY] = portalCustomEntries(layout).filter((item) => item.key !== key);
+      delete layout[key];
+    } else {
+      const item = currentItem(selected);
+      item.hidden = true;
+    }
+    applyPortalLayout(layout);
+    selectTarget(null);
+    pushHistory("Elemento removido da visualizacao. Use desfazer para trazer de volta.");
+  };
+
+  const layerSelected = (delta) => {
+    if (!selected) return;
+    const item = currentItem(selected);
+    item.zIndex = clampLayoutNumber((item.zIndex || 7) + delta, 1, 99);
+    applyPortalLayout(layout);
+    refreshSelected();
+    pushHistory(delta > 0 ? "Elemento trazido para frente." : "Elemento enviado para tras.");
+  };
+
+  const clearEverything = () => {
+    if (!confirm("Limpar todo o layout salvo e voltar para o padrao?")) return;
+    layout = {};
+    localStorage.removeItem(PORTAL_LAYOUT_STORAGE_KEY);
+    undoStack = [clonePortalLayout(layout)];
+    redoStack = [];
+    resetPortalLayoutStyles();
+    selected = null;
+    refreshToolButtons();
+    setPortalLayoutStatus("Layout limpo. Voce pode organizar de novo.");
+  };
+
+  toggle?.addEventListener("click", () => {
+    if (!canEditPortalLayout()) return;
+    setEditing(!editing);
+  });
+  saveButton?.addEventListener("click", () => {
+    if (!canEditPortalLayout()) return;
+    writePortalLayout(layout);
+    setPortalLayoutStatus("Layout salvo neste navegador.");
+  });
+  resetButton?.addEventListener("click", () => {
+    if (!canEditPortalLayout()) return;
+    undoLayout();
+  });
+  redoButton?.addEventListener("click", () => {
+    if (!canEditPortalLayout()) return;
+    redoLayout();
+  });
+  addTextButton?.addEventListener("click", () => {
+    if (!canEditPortalLayout()) return;
+    createCustomElement("text");
+  });
+  addBoxButton?.addEventListener("click", () => {
+    if (!canEditPortalLayout()) return;
+    createCustomElement("box");
+  });
+  addImageButton?.addEventListener("click", () => {
+    if (!canEditPortalLayout()) return;
+    pendingImageMode = "new";
+    newImageInput?.click();
+  });
+  duplicateButton?.addEventListener("click", () => {
+    if (!canEditPortalLayout()) return;
+    duplicateSelected();
+  });
+  deleteButton?.addEventListener("click", () => {
+    if (!canEditPortalLayout()) return;
+    deleteSelected();
+  });
+  bringForwardButton?.addEventListener("click", () => {
+    if (!canEditPortalLayout()) return;
+    layerSelected(1);
+  });
+  sendBackwardButton?.addEventListener("click", () => {
+    if (!canEditPortalLayout()) return;
+    layerSelected(-1);
+  });
+  hardResetButton?.addEventListener("click", () => {
+    if (!canEditPortalLayout()) return;
+    clearEverything();
+  });
+
+  swapButton?.addEventListener("click", () => {
+    if (!canEditPortalLayout()) return;
+    if (!selected || !portalTargetImage(selected)) {
+      setPortalLayoutStatus("Selecione um bloco que tenha imagem para trocar.");
+      return;
+    }
+    pendingImageMode = "swap";
+    imageInput?.click();
+  });
+
+  imageInput?.addEventListener("change", () => {
+    if (!canEditPortalLayout()) return;
+    const file = imageInput.files?.[0];
+    if (!file || !selected) return;
+    const image = portalTargetImage(selected);
+    if (!image) return;
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      const item = currentItem(selected);
+      item.imageSrc = String(reader.result || "");
+      image.src = item.imageSrc;
+      pushHistory(`Imagem trocada em ${selected.dataset.layoutKey}.`);
+      imageInput.value = "";
+    });
+    reader.readAsDataURL(file);
+  });
+
+  newImageInput?.addEventListener("change", () => {
+    if (!canEditPortalLayout()) return;
+    const file = newImageInput.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      createCustomElement("image", {
+        imageSrc: String(reader.result || ""),
+        label: file.name,
+        x: 260,
+        y: 160,
+      });
+      newImageInput.value = "";
+      pendingImageMode = "swap";
+    });
+    reader.readAsDataURL(file);
+  });
+
+  portalScreen?.addEventListener("click", (event) => {
+    if (!editing || !canEditPortalLayout()) return;
+    if (portalLayoutTargetFromEvent(event, portalScreen)) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  }, true);
+
+  portalScreen?.addEventListener("dblclick", (event) => {
+    if (!editing || !canEditPortalLayout()) return;
+    const target = portalLayoutTargetFromEvent(event, portalScreen);
+    if (!target) return;
+    selectTarget(target);
+    editSelectedText();
+    event.preventDefault();
+    event.stopPropagation();
+  }, true);
+
+  portalScreen?.addEventListener("pointerdown", (event) => {
+    if (!editing || !canEditPortalLayout()) return;
+    const target = portalLayoutTargetFromEvent(event, portalScreen);
+    if (!target || !portalScreen.contains(target)) return;
+    const item = currentItem(target);
+    selectTarget(target);
+    const handle = event.target.closest(".layout-resize-handle");
+    const resizing = Boolean(handle);
+    const rect = target.getBoundingClientRect();
+    activeDrag = {
+      target,
+      resizing,
+      direction: handle?.dataset.resizeDirection || "",
+      startX: event.clientX,
+      startY: event.clientY,
+      startItemX: item.x,
+      startItemY: item.y,
+      startScaleX: item.scaleX,
+      startScaleY: item.scaleY,
+      baseWidth: Math.max(1, rect.width / item.scaleX),
+      baseHeight: Math.max(1, rect.height / item.scaleY),
+      startSnapshot: clonePortalLayout(layout),
+    };
+    event.preventDefault();
+    event.stopPropagation();
+  }, true);
+
+  window.addEventListener("pointermove", (event) => {
+    if (!activeDrag || !canEditPortalLayout()) return;
+    const item = currentItem(activeDrag.target);
+    const dx = event.clientX - activeDrag.startX;
+    const dy = event.clientY - activeDrag.startY;
+    if (activeDrag.resizing) {
+      const visualWidth = activeDrag.baseWidth * activeDrag.startScaleX;
+      const visualHeight = activeDrag.baseHeight * activeDrag.startScaleY;
+      let newWidth = visualWidth;
+      let newHeight = visualHeight;
+      const direction = activeDrag.direction;
+
+      if (direction.includes("e")) newWidth = visualWidth + dx;
+      if (direction.includes("w")) newWidth = visualWidth - dx;
+      if (direction.includes("s")) newHeight = visualHeight + dy;
+      if (direction.includes("n")) newHeight = visualHeight - dy;
+
+      newWidth = clampLayoutNumber(newWidth, 24, activeDrag.baseWidth * 4);
+      newHeight = clampLayoutNumber(newHeight, 24, activeDrag.baseHeight * 4);
+      item.scaleX = clampLayoutNumber(newWidth / activeDrag.baseWidth, 0.2, 4);
+      item.scaleY = clampLayoutNumber(newHeight / activeDrag.baseHeight, 0.2, 4);
+
+      if (direction.includes("w")) item.x = clampLayoutNumber(activeDrag.startItemX + (visualWidth - newWidth), -1600, 1600);
+      if (direction.includes("n")) item.y = clampLayoutNumber(activeDrag.startItemY + (visualHeight - newHeight), -1600, 1600);
+    } else {
+      item.x = clampLayoutNumber(activeDrag.startItemX + dx, -1600, 1600);
+      item.y = clampLayoutNumber(activeDrag.startItemY + dy, -1600, 1600);
+    }
+    applyPortalLayout(layout);
+    refreshSelected();
+  });
+
+  window.addEventListener("pointerup", () => {
+    if (!activeDrag) return;
+    const changed = !sameLayout(layout, activeDrag.startSnapshot);
+    activeDrag = null;
+    if (changed) pushHistory("Movimento registrado. Ctrl+Z ou Desfazer volta essa acao.");
+    if (selected) {
+      setPortalLayoutStatus(describeSelection(selected));
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (!editing || !canEditPortalLayout()) return;
+    if (event.ctrlKey && event.key.toLowerCase() === "z") {
+      event.preventDefault();
+      undoLayout();
+      return;
+    }
+    if (event.ctrlKey && (event.key.toLowerCase() === "y" || (event.shiftKey && event.key.toLowerCase() === "z"))) {
+      event.preventDefault();
+      redoLayout();
+      return;
+    }
+    if (!selected) return;
+    const item = currentItem(selected);
+    const step = event.shiftKey ? 10 : 2;
+    const before = clonePortalLayout(layout);
+    if (event.key === "Escape") {
+      setEditing(false);
+      return;
+    }
+    if (event.key === "Delete" || event.key === "Backspace") {
+      event.preventDefault();
+      deleteSelected();
+      return;
+    }
+    if (event.key === "ArrowLeft") item.x -= step;
+    else if (event.key === "ArrowRight") item.x += step;
+    else if (event.key === "ArrowUp") item.y -= step;
+    else if (event.key === "ArrowDown") item.y += step;
+    else if (event.key === "+" || event.key === "=") {
+      item.scaleX = clampLayoutNumber(item.scaleX + 0.03, 0.2, 4);
+      item.scaleY = clampLayoutNumber(item.scaleY + 0.03, 0.2, 4);
+    } else if (event.key === "-" || event.key === "_") {
+      item.scaleX = clampLayoutNumber(item.scaleX - 0.03, 0.2, 4);
+      item.scaleY = clampLayoutNumber(item.scaleY - 0.03, 0.2, 4);
+    }
+    else return;
+    item.x = clampLayoutNumber(item.x, -1600, 1600);
+    item.y = clampLayoutNumber(item.y, -1600, 1600);
+    event.preventDefault();
+    applyPortalLayout(layout);
+    refreshSelected();
+    if (!sameLayout(layout, before)) pushHistory("Ajuste feito pelo teclado.");
+    setPortalLayoutStatus(describeSelection(selected));
+  });
+
+  applyPortalLayout(layout);
+  refreshToolButtons();
+}
+
 async function bootApp() {
   console.log("App iniciado");
   logSupabaseAvailability();
@@ -10810,6 +11904,7 @@ async function bootApp() {
   if (!document.getElementById(state.activeTab)) state.activeTab = "mesa";
   await updateServerStatus();
   renderAll();
+  initPortalLayoutEditor();
   if (state.currentUserId && currentUser()) {
     showPortal();
     startBackgroundDataLoad("sessao_salva");

@@ -92,57 +92,88 @@
     <section id="portalScreen" class="portal-screen hidden">
       <div class="portal-folder paper-panel">
         <header class="portal-head">
-          <nav class="orbe-top-nav" aria-label="Navegacao ORBE">
+          <button id="portalMobileMenuButton" class="portal-mobile-menu-button" type="button" aria-expanded="false" aria-controls="portalTopNav">☰ Menu</button>
+          <nav id="portalTopNav" class="orbe-top-nav" aria-label="Navegacao ORBE" data-layout-key="top-nav">
             <button class="active" type="button" data-portal-page-button="inicio">Inicio</button>
             <button type="button" data-portal-page-button="mesas">Mesas</button>
             <button type="button" data-portal-page-button="fichas">Fichas</button>
             <button type="button" data-portal-page-button="sistemas">Sistemas</button>
             <button type="button" data-portal-page-button="biblioteca">Biblioteca</button>
           </nav>
-          <div>
+          <div data-layout-key="portal-brand">
             <h1 class="orbe-logo-title"><img class="orbe-logo-image" src="./assets/orbe-logo.png" alt="ORBE" /></h1>
             <p id="portalSubtitle">Central de Criacao</p>
             <p id="portalLoadStatus" class="sync-status">Pronto.</p>
           </div>
-          <div class="portal-actions">
+          <div class="portal-actions" data-layout-key="portal-actions">
             <span id="portalUserBadge" class="access-level">USUARIO</span>
             <button id="logoutButton" type="button">Sair</button>
           </div>
         </header>
+        <div class="portal-layout-tools" data-layout-editor>
+          <button id="portalLayoutToggle" type="button">Organizar pagina</button>
+          <button id="portalLayoutSave" type="button" hidden>Salvar layout</button>
+          <button id="portalLayoutReset" type="button" hidden>Desfazer</button>
+          <button id="portalLayoutRedo" type="button" hidden>Refazer</button>
+          <button id="portalLayoutAddText" type="button" hidden>+ Texto</button>
+          <button id="portalLayoutAddBox" type="button" hidden>+ Caixa</button>
+          <button id="portalLayoutAddImage" type="button" hidden>+ Imagem</button>
+          <button id="portalLayoutDuplicate" type="button" hidden>Duplicar</button>
+          <button id="portalLayoutDelete" type="button" hidden>Remover</button>
+          <button id="portalLayoutBringForward" type="button" hidden>Frente</button>
+          <button id="portalLayoutSendBackward" type="button" hidden>Fundo</button>
+          <button id="portalLayoutSwapImage" type="button" hidden>Trocar imagem</button>
+          <button id="portalLayoutHardReset" type="button" hidden>Limpar tudo</button>
+          <input id="portalLayoutImageInput" type="file" accept="image/*" hidden />
+          <input id="portalLayoutNewImageInput" type="file" accept="image/*" hidden />
+          <span id="portalLayoutStatus" aria-live="polite">Arrume a pagina quando quiser.</span>
+        </div>
         <div class="portal-pages">
           <section class="portal-page active" data-portal-page="inicio">
-            <section class="portal-intro">
-              <div>
-                <span class="intro-kicker">Central de Criacao</span>
+            <section class="portal-intro" data-layout-key="intro">
+              <div id="portalCustomLayer" class="portal-custom-layer" aria-hidden="false"></div>
+              <div class="portal-intro-content" data-layout-key="intro-text">
+                <span class="intro-kicker portal-central-title" data-layout-key="central-title">
+                  <img src="./assets/orbe/home-central-title.png" alt="Central de Criacao" />
+                </span>
                 <h2>Suas mesas, mundos e historias em um so lugar.</h2>
                 <p>ORBE organiza campanhas, fichas, mapas, rolagens, inventarios e arquivos de sessao em uma central feita para mestres e jogadores.</p>
                 <div class="portal-hero-actions">
-                  <button class="primary" type="button" data-portal-page-link="mesas">Criar ou abrir mesa</button>
-                  <button type="button" data-portal-page-link="fichas">Gerenciar fichas</button>
+                  <button class="primary portal-cta portal-cta-gold portal-cta-image" type="button" data-portal-page-link="mesas" data-layout-key="hero-action-mesas">
+                    <img src="./assets/orbe/home-button-create.png" alt="" />
+                    <span>Criar ou abrir mesa</span>
+                  </button>
+                  <button class="portal-cta portal-cta-dark" type="button" data-portal-page-link="fichas" data-layout-key="hero-action-fichas"><span>Gerenciar fichas</span></button>
                 </div>
               </div>
-              <dl>
-                <div><dt>Mesas</dt><dd>Campanhas com mestre, jogadores e convites</dd></div>
-                <div><dt>Fichas</dt><dd>Personagens separados por sistema de RPG</dd></div>
-                <div><dt>Mapas</dt><dd>Grid, tokens, rolagens e pistas em tempo real</dd></div>
+              <dl class="portal-feature-gallery" data-layout-key="feature-gallery">
+                <div class="portal-feature-card portal-feature-mesas" role="button" tabindex="0" data-portal-page-link="mesas" data-layout-key="feature-mesas">
+                  <img src="./assets/orbe/portal-mesas.png" alt="Mesas - campanhas com mestres, jogadores e convites" loading="lazy" />
+                  <dt>Mesas</dt>
+                  <dd>Campanhas com mestre, jogadores e convites</dd>
+                </div>
+                <div class="portal-feature-card portal-feature-fichas" role="button" tabindex="0" data-portal-page-link="fichas" data-layout-key="feature-fichas">
+                  <img src="./assets/orbe/portal-fichas.png" alt="Fichas - personagens separados por sistema de RPG" loading="lazy" />
+                  <dt>Fichas</dt>
+                  <dd>Personagens separados por sistema de RPG</dd>
+                </div>
+                <div class="portal-feature-card portal-feature-mapas" role="button" tabindex="0" data-portal-page-link="mesas" data-layout-key="feature-mapas">
+                  <img src="./assets/orbe/portal-mapas.png" alt="Mapas - grid, tokens, rolagens e pistas em tempo real" loading="lazy" />
+                  <dt>Mapas</dt>
+                  <dd>Grid, tokens, rolagens e pistas em tempo real</dd>
+                </div>
               </dl>
             </section>
-            <section class="portal-home-showcase">
-              <article>
-                <span>01</span>
-                <h3>Escolha o sistema</h3>
-                <p>Arquivo, D&D 5e ou regras proprias, cada mesa mantem sua identidade e sua ficha correta.</p>
-              </article>
-              <article>
-                <span>02</span>
-                <h3>Monte a mesa</h3>
-                <p>Crie a campanha, envie convite e acompanhe quem entrou direto pelo painel do mestre.</p>
-              </article>
-              <article>
-                <span>03</span>
-                <h3>Jogue junto</h3>
-                <p>Fichas, inventario, mapas, chat, dados e arquivos ficam reunidos durante a sessao.</p>
-              </article>
+            <section class="portal-home-showcase" data-layout-key="step-showcase">
+              <button class="portal-step-card" type="button" data-portal-page-link="sistemas" data-layout-key="step-01">
+                <img src="./assets/orbe/home-step-01.png" alt="01 - Escolha o sistema" loading="lazy" />
+              </button>
+              <button class="portal-step-card" type="button" data-portal-page-link="mesas" data-layout-key="step-02">
+                <img src="./assets/orbe/home-step-02.png" alt="02 - Monte a mesa" loading="lazy" />
+              </button>
+              <button class="portal-step-card" type="button" data-portal-page-link="mesas" data-layout-key="step-03">
+                <img src="./assets/orbe/home-step-03.png" alt="03 - Jogue junto" loading="lazy" />
+              </button>
             </section>
           </section>
 
@@ -270,6 +301,7 @@
         <header class="topbar archive-topbar">
           <button id="sidebarToggle" class="sidebar-toggle" type="button" aria-expanded="false" aria-controls="appShell">☰ Menu</button>
           <button id="topRefreshCampaignButton" class="sidebar-toggle master-only top-refresh-button" type="button">↻ Atualizar</button>
+          <button id="mobileRollButton" class="sidebar-toggle mobile-roll-button" type="button">Dados</button>
           <div>
             <p class="eyebrow">Campanha local</p>
             <h2 id="viewTitle">Mapa de combate</h2>
@@ -622,6 +654,17 @@
           </section>
         </section>
       </section>
+      <div id="mobilePanelBackdrop" class="mobile-panel-backdrop" hidden></div>
+      <div id="mobilePanelMenu" class="mobile-panel-menu" aria-label="Atalhos da mesa">
+        <button id="mobilePanelToggle" class="mobile-panel-toggle" type="button" aria-expanded="false">☰</button>
+        <div class="mobile-panel-actions">
+          <button class="master-only" type="button" data-mobile-panel="master">Escudo</button>
+          <button type="button" data-mobile-panel="clues">Pistas</button>
+          <button type="button" data-mobile-panel="voice">Voz</button>
+          <button type="button" data-mobile-panel="soundtrack">Trilha</button>
+          <button type="button" data-mobile-panel="history">Historico</button>
+        </div>
+      </div>
     </main>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="./supabaseClient.js"></script>
